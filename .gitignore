@@ -1,0 +1,7 @@
+tmp/
+**/__pycache__/
+**/__MACOSX/
+*.pyc
+.venv/
+venv/
+.env
