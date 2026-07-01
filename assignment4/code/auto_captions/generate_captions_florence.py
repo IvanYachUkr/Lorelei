@@ -37,6 +37,12 @@ def clean_caption(text):
     
     # get rid of trailing dot, comma and whitespace
     text = text.strip(" ,.")
+
+    # weird association the model has sometimes. It will just spit out "professor layton and the unwound future", which is a Nintendo DS-game with a similar-ish art style to ghibli
+    # -> just label it "a scene" instead
+    if "professor layton" in text:
+        text = "a scene"
+
     return text 
 
 def main():
