@@ -5,12 +5,11 @@ import json
 import re
 
 import torch
-from PIL import Image, ImageOps
+from PIL import Image
 from tqdm.auto import tqdm
-from transformers import AutoModelForCausalLM, AutoProcessor, AutoTokenizer, PretrainedConfig
+from transformers import AutoModelForCausalLM, AutoProcessor
 
 from os import listdir
-from os.path import isfile, join
 
 # dumb dependency issue with flash_attn module -> make it not use it
 import transformers.dynamic_module_utils as _dyn
@@ -18,13 +17,13 @@ _orig_get_imports = _dyn.get_imports
 _dyn.get_imports = lambda path: [m for m in _orig_get_imports(path) if m != "flash_attn"]
 
 
-# 
 DATA_DIR = "../../style_imgs/512"
 OUT_PATH = "./florence_captions.jsonl"
 MODEL_NAME = "microsoft/Florence-2-large"
 
-def clean_caption(text: str) -> str:
+def clean_caption(text):
     text = text.lower()
+
     # get rid of starting descriptions that already incorporate the style because that's going to be added with the <sks> token later
     # e.g. "A cartoon of a girl" -> "a girl" 
     text = re.sub(
@@ -33,12 +32,11 @@ def clean_caption(text: str) -> str:
         text,
     )
 
-    # get rid of adjectives that already contain style stuff
+    # get rid of adjectives that already contain style info
     text = re.sub(r"\b(painted|drawn|illustrated|cartoon|anime)\s+", "", text)
     
     # get rid of trailing dot, comma and whitespace
     text = text.strip(" ,.")
-
     return text 
 
 def main():
