@@ -20,27 +20,39 @@ except ImportError as exc:  # pragma: no cover
     ) from exc
 
 
-CUSTOM_TOKEN_EMBEDDING_KEY = "__custom_token_embedding__"
-LORA_FILENAME = "pytorch_lora_weights.safetensors"
+from config import (
+    CUSTOM_TOKEN_EMBEDDING_KEY,
+    DEFAULT_GUIDANCE_SCALE,
+    DEFAULT_MODEL_NAME,
+    DEFAULT_NUM_INFERENCE_STEPS,
+    DEFAULT_SAMPLE_DTYPE,
+    DEFAULT_SAMPLE_HEIGHT,
+    DEFAULT_SAMPLE_NUM_IMAGES,
+    DEFAULT_SAMPLE_OUTDIR,
+    DEFAULT_SAMPLE_PROMPT,
+    DEFAULT_SAMPLE_SEED,
+    DEFAULT_SAMPLE_WIDTH,
+    LORA_FILENAME,
+)
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Generate images with the trained style LoRA adapter.")
     parser.add_argument("--weights", type=Path, required=True, help="Path to pytorch_lora_weights.safetensors.")
-    parser.add_argument("--prompt", default="a busy market, in <sks> style", help="Prompt to render.")
-    parser.add_argument("--outdir", type=Path, default=Path("samples"), help="Directory for generated PNGs.")
-    parser.add_argument("--model_name", default="runwayml/stable-diffusion-v1-5", help="Base SD 1.5 model id or path.")
+    parser.add_argument("--prompt", default=DEFAULT_SAMPLE_PROMPT, help="Prompt to render.")
+    parser.add_argument("--outdir", type=Path, default=DEFAULT_SAMPLE_OUTDIR, help="Directory for generated PNGs.")
+    parser.add_argument("--model_name", default=DEFAULT_MODEL_NAME, help="Base SD 1.5 model id or path.")
     parser.add_argument("--revision", default=None, help="Optional Hugging Face model revision.")
     parser.add_argument("--variant", default=None, help="Optional model variant, such as fp16.")
     parser.add_argument("--instance_token", default=None, help="Override token if metadata is missing.")
-    parser.add_argument("--num_images", type=int, default=3, help="Number of adapter samples to render.")
-    parser.add_argument("--seed", type=int, default=1234)
-    parser.add_argument("--num_inference_steps", type=int, default=30)
-    parser.add_argument("--guidance_scale", type=float, default=7.5)
-    parser.add_argument("--height", type=int, default=512)
-    parser.add_argument("--width", type=int, default=512)
+    parser.add_argument("--num_images", type=int, default=DEFAULT_SAMPLE_NUM_IMAGES, help="Number of adapter samples to render.")
+    parser.add_argument("--seed", type=int, default=DEFAULT_SAMPLE_SEED)
+    parser.add_argument("--num_inference_steps", type=int, default=DEFAULT_NUM_INFERENCE_STEPS)
+    parser.add_argument("--guidance_scale", type=float, default=DEFAULT_GUIDANCE_SCALE)
+    parser.add_argument("--height", type=int, default=DEFAULT_SAMPLE_HEIGHT)
+    parser.add_argument("--width", type=int, default=DEFAULT_SAMPLE_WIDTH)
     parser.add_argument("--device", default=None, help="Defaults to cuda when available, otherwise cpu.")
-    parser.add_argument("--dtype", choices=["auto", "float32", "float16", "bfloat16"], default="auto")
+    parser.add_argument("--dtype", choices=["auto", "float32", "float16", "bfloat16"], default=DEFAULT_SAMPLE_DTYPE)
     parser.add_argument("--baseline", action="store_true", help="Also render baseline images before loading the adapter.")
     return parser.parse_args()
 
