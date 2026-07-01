@@ -17,18 +17,15 @@ import transformers.dynamic_module_utils as _dyn
 _orig_get_imports = _dyn.get_imports
 _dyn.get_imports = lambda path: [m for m in _orig_get_imports(path) if m != "flash_attn"]
 
+
+# 
 DATA_DIR = "../../style_imgs/512"
 OUT_PATH = "./florence_captions.jsonl"
-
 MODEL_NAME = "microsoft/Florence-2-large"
-
-STYLE_TOKEN = "<sks>"
-
-
 
 def clean_caption(text: str) -> str:
     text = text.lower()
-    # get rid of starting descriptions that already incorporate the style as we're going to add it with the <sks> token later
+    # get rid of starting descriptions that already incorporate the style because that's going to be added with the <sks> token later
     # e.g. "A cartoon of a girl" -> "a girl" 
     text = re.sub(
         r"^(an?|the)\s+(painting|drawing|illustration|cartoon|picture)\s+of\s+",
@@ -86,7 +83,7 @@ def main():
                 "image": path,
                 "caption_raw": parsed_answer,
                 "caption": caption,
-                "prompt": f"{caption}, in {STYLE_TOKEN} style",
+                "prompt": f"{caption}, in <sks> style",
             }
             handle.write(json.dumps(row) + "\n")
 
