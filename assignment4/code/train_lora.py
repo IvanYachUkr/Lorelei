@@ -47,10 +47,35 @@ try:
 except ImportError as exc:  # pragma: no cover
     raise SystemExit("Missing Transformers. Install it with: pip install -r requirements.txt") from exc
 
-
-SUPPORTED_EXTENSIONS = {".bmp", ".jpeg", ".jpg", ".png", ".webp"}
-LORA_FILENAME = "pytorch_lora_weights.safetensors"
-CUSTOM_TOKEN_EMBEDDING_KEY = "__custom_token_embedding__"
+from config import (
+    CUSTOM_TOKEN_EMBEDDING_KEY,
+    DEFAULT_ADAM_BETA1,
+    DEFAULT_ADAM_BETA2,
+    DEFAULT_ADAM_EPSILON,
+    DEFAULT_ADAM_WEIGHT_DECAY,
+    DEFAULT_GRADIENT_ACCUMULATION_STEPS,
+    DEFAULT_INSTANCE_TOKEN,
+    DEFAULT_LEARNING_RATE,
+    DEFAULT_LORA_ALPHA,
+    DEFAULT_LR_SCHEDULER,
+    DEFAULT_LR_WARMUP_STEPS,
+    DEFAULT_MAX_GRAD_NORM,
+    DEFAULT_MAX_STEPS,
+    DEFAULT_MIXED_PRECISION,
+    DEFAULT_MODEL_NAME,
+    DEFAULT_NUM_WORKERS,
+    DEFAULT_OUTPUT_DIR,
+    DEFAULT_PROMPT_TEMPLATE,
+    DEFAULT_RANK,
+    DEFAULT_REPEATS,
+    DEFAULT_RESOLUTION,
+    DEFAULT_TOKEN_INITIALIZER,
+    DEFAULT_TRAIN_BATCH_SIZE,
+    DEFAULT_TRAIN_SEED,
+    LORA_FILENAME,
+    SUPPORTED_EXTENSIONS,
+)
+from token_utils import setup_custom_token
 
 
 class StyleImageDataset(Dataset):
@@ -115,36 +140,37 @@ class StyleImageDataset(Dataset):
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Train Stable Diffusion 1.5 LoRA adapters for a style token.")
     parser.add_argument("--data_dir", type=Path, required=True, help="Directory of training images.")
-    parser.add_argument("--instance_token", default="<sks>", help="New tokenizer token used in prompts.")
-    parser.add_argument("--output_dir", type=Path, default=Path("lora_out"), help="Directory for the final LoRA file.")
-    parser.add_argument("--model_name", default="runwayml/stable-diffusion-v1-5", help="Base SD 1.5 model id or path.")
     parser.add_argument("--revision", default=None, help="Optional Hugging Face model revision.")
     parser.add_argument("--variant", default=None, help="Optional model variant, such as fp16.")
-    parser.add_argument("--rank", type=int, default=8, help="LoRA rank.")
-    parser.add_argument("--lora_alpha", type=int, default=None, help="LoRA alpha. Defaults to rank.")
-    parser.add_argument("--learning_rate", type=float, default=1e-4, help="Optimizer learning rate.")
-    parser.add_argument("--adam_beta1", type=float, default=0.9)
-    parser.add_argument("--adam_beta2", type=float, default=0.999)
-    parser.add_argument("--adam_weight_decay", type=float, default=1e-2)
-    parser.add_argument("--adam_epsilon", type=float, default=1e-8)
-    parser.add_argument("--max_grad_norm", type=float, default=1.0)
-    parser.add_argument("--resolution", type=int, default=512)
-    parser.add_argument("--train_batch_size", type=int, default=1)
-    parser.add_argument("--gradient_accumulation_steps", type=int, default=4)
-    parser.add_argument("--max_steps", type=int, default=800)
-    parser.add_argument("--lr_scheduler", default="constant", help="Diffusers scheduler name.")
-    parser.add_argument("--lr_warmup_steps", type=int, default=0)
-    parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--num_workers", type=int, default=0, help="Use 0 on Windows unless you need multiprocessing.")
-    parser.add_argument("--repeats", type=int, default=1, help="Virtual repeats for small datasets.")
+    parser.add_argument("--instance_token", default=DEFAULT_INSTANCE_TOKEN, help="New tokenizer token used in prompts.")
+    parser.add_argument("--output_dir", type=Path, default=DEFAULT_OUTPUT_DIR, help="Directory for the final LoRA file.")
+    parser.add_argument("--model_name", default=DEFAULT_MODEL_NAME, help="Base SD 1.5 model id or path.")
+    parser.add_argument("--rank", type=int, default=DEFAULT_RANK, help="LoRA rank.")
+    parser.add_argument("--lora_alpha", type=int, default=DEFAULT_LORA_ALPHA, help="LoRA alpha. Defaults to rank.")
+    parser.add_argument("--learning_rate", type=float, default=DEFAULT_LEARNING_RATE, help="Optimizer learning rate.")
+    parser.add_argument("--adam_beta1", type=float, default=DEFAULT_ADAM_BETA1)
+    parser.add_argument("--adam_beta2", type=float, default=DEFAULT_ADAM_BETA2)
+    parser.add_argument("--adam_weight_decay", type=float, default=DEFAULT_ADAM_WEIGHT_DECAY)
+    parser.add_argument("--adam_epsilon", type=float, default=DEFAULT_ADAM_EPSILON)
+    parser.add_argument("--max_grad_norm", type=float, default=DEFAULT_MAX_GRAD_NORM)
+    parser.add_argument("--resolution", type=int, default=DEFAULT_RESOLUTION)
+    parser.add_argument("--train_batch_size", type=int, default=DEFAULT_TRAIN_BATCH_SIZE)
+    parser.add_argument("--gradient_accumulation_steps", type=int, default=DEFAULT_GRADIENT_ACCUMULATION_STEPS)
+    parser.add_argument("--max_steps", type=int, default=DEFAULT_MAX_STEPS)
+    parser.add_argument("--lr_scheduler", default=DEFAULT_LR_SCHEDULER, help="Diffusers scheduler name.")
+    parser.add_argument("--lr_warmup_steps", type=int, default=DEFAULT_LR_WARMUP_STEPS)
+    parser.add_argument("--seed", type=int, default=DEFAULT_TRAIN_SEED)
+    parser.add_argument("--num_workers", type=int, default=DEFAULT_NUM_WORKERS, help="Use 0 on Windows unless you need multiprocessing.")
+    parser.add_argument("--repeats", type=int, default=DEFAULT_REPEATS, help="Virtual repeats for small datasets.")
     parser.add_argument(
         "--prompt_template",
-        default="an animated movie scene, in {instance_token} style",
+        default=DEFAULT_PROMPT_TEMPLATE,
         help="Training prompt template. Must contain {instance_token}.",
     )
+
     parser.add_argument(
         "--token_initializer",
-        default="style",
+        default=DEFAULT_TOKEN_INITIALIZER,
         help="Phrase whose token embeddings initialize the new custom token.",
     )
     parser.add_argument("--center_crop", action="store_true", help="Use center crop instead of random crop.")
@@ -152,7 +178,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--mixed_precision",
         choices=["no", "fp16", "bf16"],
-        default="fp16",
+        default=DEFAULT_MIXED_PRECISION,
         help="Training precision. fp16 is recommended on CUDA GPUs.",
     )
     parser.add_argument("--gradient_checkpointing", action="store_true", help="Enable gradient checkpointing.")
@@ -249,32 +275,6 @@ def import_model_components(args: argparse.Namespace, torch_dtype: torch.dtype):
         revision=args.revision,
     )
     return tokenizer, text_encoder, vae, unet, noise_scheduler
-
-
-def setup_custom_token(tokenizer, text_encoder, instance_token: str, initializer: str) -> int:
-    num_added = tokenizer.add_tokens([instance_token])
-    token_id = tokenizer.convert_tokens_to_ids(instance_token)
-    if token_id is None or token_id == tokenizer.unk_token_id:
-        raise ValueError(f"Could not add or resolve instance token: {instance_token}")
-
-    tokenized = tokenizer(instance_token, add_special_tokens=False).input_ids
-    if len(tokenized) != 1:
-        raise ValueError(f"{instance_token!r} must tokenize to one id after insertion, got {tokenized}")
-
-    if num_added:
-        text_encoder.resize_token_embeddings(len(tokenizer))
-
-    initializer_ids = tokenizer(initializer, add_special_tokens=False).input_ids
-    initializer_ids = [idx for idx in initializer_ids if idx != token_id]
-    if not initializer_ids:
-        raise ValueError("--token_initializer must tokenize to at least one existing token")
-
-    embedding = text_encoder.get_input_embeddings().weight
-    with torch.no_grad():
-        initializer_tensor = torch.tensor(initializer_ids, device=embedding.device)
-        embedding[token_id].copy_(embedding[initializer_tensor].mean(dim=0))
-
-    return token_id
 
 
 def freeze_models(*models) -> None:
