@@ -2,73 +2,75 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
+from pathlib import Path
 
 import torch
 from PIL import Image
 from tqdm.auto import tqdm
 from transformers import AutoModelForCausalLM, AutoProcessor
 
-from os import listdir
-
-# dumb dependency issue with flash_attn module -> make it not use it
+# Florence's remote module lists flash_attn even when standard attention is used.
 import transformers.dynamic_module_utils as _dyn
 _orig_get_imports = _dyn.get_imports
 _dyn.get_imports = lambda path: [m for m in _orig_get_imports(path) if m != "flash_attn"]
 
 
-DATA_DIR = "../../style_imgs/512"
-OUT_PATH = "./florence_captions.jsonl"
-MODEL_NAME = "microsoft/Florence-2-large"
+SCRIPT_DIR = Path(__file__).resolve().parent
+ASSIGNMENT_DIR = SCRIPT_DIR.parents[1]
+DATA_DIR = ASSIGNMENT_DIR / "style_imgs" / "512"
+OUT_PATH = SCRIPT_DIR / "florence_captions.jsonl"
+MODEL_NAME = "microsoft/Florence-2-base"
 
-def clean_caption(text):
+
+def clean_caption(text: str) -> str:
     text = text.lower()
-
-    # get rid of starting descriptions that already incorporate the style because that's going to be added with the <sks> token later
-    # e.g. "A cartoon of a girl" -> "a girl" 
     text = re.sub(
         r"^(an?|the)\s+(painting|drawing|illustration|cartoon|picture)\s+of\s+",
         "",
         text,
     )
-
-    # get rid of adjectives that already contain style info
     text = re.sub(r"\b(painted|drawn|illustrated|cartoon|anime)\s+", "", text)
-    
-    # get rid of trailing dot, comma and whitespace
     text = text.strip(" ,.")
-
-    # weird association the model has sometimes. It will just spit out "professor layton and the unwound future", which is a Nintendo DS-game with a similar-ish art style to ghibli
-    # -> just label it "a scene" instead
     if "professor layton" in text:
         text = "a scene"
+    return text
 
-    return text 
 
-def main():
-
+def main() -> None:
     parser = argparse.ArgumentParser()
+    parser.add_argument("--data_dir", type=Path, default=DATA_DIR)
+    parser.add_argument("--out_path", type=Path, default=OUT_PATH)
+    parser.add_argument("--model_name", default=MODEL_NAME)
     parser.add_argument("--limit", type=int, default=None)
     args = parser.parse_args()
 
-    image_paths = [DATA_DIR + "/" + f for f in listdir(DATA_DIR) if f[-4:] in [".jpg", ".png"]]
+    image_paths = sorted(
+        path
+        for path in args.data_dir.iterdir()
+        if path.is_file() and path.suffix.lower() in {".jpg", ".png"}
+    )
     if args.limit:
         image_paths = image_paths[: args.limit]
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    dtype = torch.float16
+    dtype = torch.float16 if device == "cuda" else torch.float32
 
-    model = AutoModelForCausalLM.from_pretrained("microsoft/Florence-2-base", torch_dtype=dtype, trust_remote_code=True).to(device)
-    processor = AutoProcessor.from_pretrained("microsoft/Florence-2-base", trust_remote_code=True)
+    model = AutoModelForCausalLM.from_pretrained(
+        args.model_name,
+        torch_dtype=dtype,
+        trust_remote_code=True,
+    ).to(device)
+    processor = AutoProcessor.from_pretrained(args.model_name, trust_remote_code=True)
 
+    task = "<CAPTION>"
 
-    TASK="<CAPTION>"
-
-    with open(OUT_PATH, "w", encoding="utf-8") as handle:
+    args.out_path.parent.mkdir(parents=True, exist_ok=True)
+    with args.out_path.open("w", encoding="utf-8") as handle:
         for path in tqdm(image_paths):
-
             image = Image.open(path)
-            inputs = processor(text=TASK, images=image, return_tensors="pt").to(device, dtype)
+            inputs = processor(text=task, images=image, return_tensors="pt").to(device, dtype)
             generated_ids = model.generate(
                 input_ids=inputs["input_ids"],
                 pixel_values=inputs["pixel_values"],
@@ -78,13 +80,17 @@ def main():
             )
 
             generated_text = processor.batch_decode(generated_ids, skip_special_tokens=False)[0]
-            parsed_answer = processor.post_process_generation(generated_text, task=TASK, image_size=(image.width, image.height))
+            parsed_answer = processor.post_process_generation(
+                generated_text,
+                task=task,
+                image_size=(image.width, image.height),
+            )
 
-            output_txt = parsed_answer[TASK]
+            output_txt = parsed_answer[task]
             caption = clean_caption(output_txt)
 
             row = {
-                "image": path,
+                "image": os.path.relpath(path, args.out_path.parent).replace("\\", "/"),
                 "caption_raw": parsed_answer,
                 "caption": caption,
                 "prompt": f"{caption}, in <sks> style",

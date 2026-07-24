@@ -1,0 +1,13 @@
+{
+  "base_model": "runwayml/stable-diffusion-v1-5",
+  "copied_images": 96,
+  "images": 156,
+  "manifest_sha256": "51d5f7526e8fd5f381ab04aa1866a5916e239c2ca476b2ab3172abfa75ecaf83",
+  "reused_images": 60,
+  "source_kinds": [
+    "base_self_market",
+    "base_self_market_character",
+    "base_self_people",
+    "supplied_face_crop"
+  ]
+}

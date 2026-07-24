@@ -1,0 +1,53 @@
+{
+  "data_manifest_sha256": "c737c99bef1bcd57074900dd630c4a21b0f1eeb5f6e25ef2b30a1c0cda93dff5",
+  "keys_equal": true,
+  "max_abs_diff": 0.0,
+  "metrics_equal": true,
+  "metrics_rows": 150,
+  "problems": [],
+  "reproduced_metadata": {
+    "base_model": "runwayml/stable-diffusion-v1-5",
+    "contains_custom_token_embedding": "true",
+    "custom_token_embedding_key": "__custom_token_embedding__",
+    "format": "pt",
+    "instance_token": "<sks>",
+    "lora_rank": "16",
+    "preservation_loss_weight": "0.65",
+    "run_status": "paused",
+    "seed": "2202",
+    "snr_gamma": "5.0",
+    "text_encoder_learning_rate": "2.5e-06",
+    "text_encoder_lora_rank": "4",
+    "token_anchor_loss_weight": "0.05",
+    "token_learning_rate": "1e-05",
+    "training_draw_schedule_sha256": "8117eb45e0498df4bee06b99fc1baf218f59019bdc2243bfc1ab96188a9a1a01",
+    "training_step": "150",
+    "training_trace_sha256": "94728f8b57e5bce9154c29702ed3028d8b88dc79b23943addd31a6e80273e33f",
+    "unet_learning_rate": "7e-05"
+  },
+  "reproduced_sha256": "0971245dec09b67ca3b2389f14a18501df73c99b98ea4db959ecc69f4441156e",
+  "run_config_sha256": "039ceedcdb33222b4afebe0056a6dd7511a2f1c50d63f0f749d4957bc40aff9b",
+  "schedule_equal": true,
+  "schedule_rows": 2000,
+  "selected_metadata": {
+    "base_model": "runwayml/stable-diffusion-v1-5",
+    "checkpoint_kind": "periodic",
+    "contains_custom_token_embedding": "true",
+    "custom_token_embedding_key": "__custom_token_embedding__",
+    "format": "pt",
+    "instance_token": "<sks>",
+    "lora_rank": "16",
+    "text_encoder_lora_rank": "4",
+    "training_step": "150"
+  },
+  "selected_sha256": "606190249fe5df2d4c36bb48552cb9837bfcc91e8388ef85abe25688ad71c788",
+  "session_steps": [
+    150
+  ],
+  "tensor_count": 353,
+  "tensors_equal": true,
+  "trace_equal": true,
+  "trace_rows": 600,
+  "unequal_tensors": [],
+  "verified": true
+}

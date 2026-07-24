@@ -4,8 +4,14 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
+import importlib.metadata
+import json
 import os
+import platform
+import sys
 import tempfile
+from datetime import datetime, timezone
 from pathlib import Path
 
 import torch
@@ -22,6 +28,41 @@ except ImportError as exc:  # pragma: no cover
 
 CUSTOM_TOKEN_EMBEDDING_KEY = "__custom_token_embedding__"
 LORA_FILENAME = "pytorch_lora_weights.safetensors"
+
+
+def file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def package_versions() -> dict[str, str]:
+    versions: dict[str, str] = {}
+    for package in ("torch", "diffusers", "peft", "transformers", "safetensors"):
+        try:
+            versions[package] = importlib.metadata.version(package)
+        except importlib.metadata.PackageNotFoundError:
+            versions[package] = "not-installed"
+    return versions
+
+
+def json_safe(value):
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, dict):
+        return {str(key): json_safe(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [json_safe(item) for item in value]
+    return str(value)
+
+
+def atomic_write_json(path: Path, document: dict[str, object]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary_path = path.with_suffix(path.suffix + ".tmp")
+    temporary_path.write_text(json.dumps(document, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    os.replace(temporary_path, path)
 
 
 def parse_args() -> argparse.Namespace:
@@ -135,10 +176,12 @@ def render_images(
     height: int,
     width: int,
     device: torch.device,
-) -> None:
+) -> list[dict[str, object]]:
     outdir.mkdir(parents=True, exist_ok=True)
+    records: list[dict[str, object]] = []
     for index in range(num_images):
-        generator = torch.Generator(device=device.type).manual_seed(seed + index)
+        image_seed = seed + index
+        generator = torch.Generator(device=device.type).manual_seed(image_seed)
         image = pipe(
             prompt=prompt,
             num_inference_steps=num_inference_steps,
@@ -147,11 +190,23 @@ def render_images(
             width=width,
             generator=generator,
         ).images[0]
-        image.save(outdir / f"{prefix}_{index:02d}.png")
+        image_path = outdir / f"{prefix}_{index:02d}.png"
+        image.save(image_path)
+        records.append(
+            {
+                "kind": prefix,
+                "index": index,
+                "seed": image_seed,
+                "path": image_path.name,
+                "sha256": file_sha256(image_path),
+            }
+        )
+    return records
 
 
 def main() -> None:
     os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
+    os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")
     args = parse_args()
     if not args.weights.exists():
         raise FileNotFoundError(args.weights)
@@ -161,12 +216,20 @@ def main() -> None:
     device = choose_device(args.device)
     dtype = choose_dtype(args.dtype, device)
     metadata = read_metadata(args.weights)
+    torch.use_deterministic_algorithms(True, warn_only=False)
+    if device.type == "cuda":
+        torch.backends.cudnn.benchmark = False
+        torch.backends.cudnn.deterministic = True
+        torch.backends.cuda.enable_flash_sdp(False)
+        torch.backends.cuda.enable_mem_efficient_sdp(False)
+        torch.backends.cuda.enable_math_sdp(True)
 
     pipe = load_pipeline(args, device=device, dtype=dtype)
     add_or_restore_custom_token(pipe, args.weights, metadata, args.instance_token)
+    image_records: list[dict[str, object]] = []
 
     if args.baseline:
-        render_images(
+        image_records.extend(render_images(
             pipe=pipe,
             prompt=args.prompt,
             outdir=args.outdir,
@@ -178,13 +241,13 @@ def main() -> None:
             height=args.height,
             width=args.width,
             device=device,
-        )
+        ))
 
     with tempfile.TemporaryDirectory(prefix="lora_eval_") as tmp:
         lora_path = make_lora_only_file(args.weights, metadata, Path(tmp))
         pipe.load_lora_weights(str(lora_path.parent), weight_name=lora_path.name)
 
-    render_images(
+    image_records.extend(render_images(
         pipe=pipe,
         prompt=args.prompt,
         outdir=args.outdir,
@@ -196,9 +259,42 @@ def main() -> None:
         height=args.height,
         width=args.width,
         device=device,
-    )
+    ))
 
-    print(f"Saved {args.num_images} adapter samples to {args.outdir}")
+    manifest = {
+        "format_version": 1,
+        "created_utc": datetime.now(timezone.utc).isoformat(),
+        "command": sys.argv,
+        "base_model": args.model_name,
+        "base_model_revision": args.revision,
+        "base_model_variant": args.variant,
+        "base_model_commit": json_safe(getattr(pipe.config, "_commit_hash", None)),
+        "adapter_path": str(args.weights.resolve()),
+        "adapter_sha256": file_sha256(args.weights),
+        "adapter_metadata": metadata,
+        "prompt": args.prompt,
+        "instance_token": args.instance_token or metadata.get("instance_token"),
+        "num_images": args.num_images,
+        "seed": args.seed,
+        "num_inference_steps": args.num_inference_steps,
+        "guidance_scale": args.guidance_scale,
+        "height": args.height,
+        "width": args.width,
+        "scheduler_class": type(pipe.scheduler).__name__,
+        "scheduler_config": json_safe(dict(pipe.scheduler.config)),
+        "device": str(device),
+        "gpu": torch.cuda.get_device_name(device) if device.type == "cuda" else None,
+        "dtype": str(dtype),
+        "platform": platform.platform(),
+        "python": sys.version,
+        "packages": package_versions(),
+        "deterministic_algorithms": True,
+        "images": image_records,
+    }
+    manifest_path = args.outdir / "inference_manifest.json"
+    atomic_write_json(manifest_path, manifest)
+
+    print(f"Saved {args.num_images} adapter samples and {manifest_path}")
 
 
 if __name__ == "__main__":

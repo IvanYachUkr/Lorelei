@@ -1,0 +1,40 @@
+{
+  "base_model": "runwayml/stable-diffusion-v1-5",
+  "forbidden_hash_matches": 0,
+  "manifests": {
+    "balanced_people": {
+      "counts": {
+        "base_self_market": 32,
+        "base_self_market_character": 12,
+        "base_self_people": 16,
+        "supplied_face_crop": 96
+      },
+      "rows": 156,
+      "sha256": "51d5f7526e8fd5f381ab04aa1866a5916e239c2ca476b2ab3172abfa75ecaf83",
+      "weighted_shares": {
+        "base_self_market": 0.039999999999999966,
+        "base_self_market_character": 0.039999999999999994,
+        "base_self_people": 0.019999999999999997,
+        "supplied_face_crop": 0.0800000000000001,
+        "supplied_full": 0.8199999999999998
+      }
+    },
+    "self_market": {
+      "counts": {
+        "base_self_market": 32,
+        "base_self_market_character": 12,
+        "base_self_people": 16
+      },
+      "rows": 60,
+      "sha256": "c737c99bef1bcd57074900dd630c4a21b0f1eeb5f6e25ef2b30a1c0cda93dff5",
+      "weighted_shares": {
+        "base_self_market": 0.05000000000000004,
+        "base_self_market_character": 0.05000000000000002,
+        "base_self_people": 0.039999999999999994,
+        "supplied_full": 0.86
+      }
+    }
+  },
+  "supplied_count": 843,
+  "supplied_set_sha256": "e5a7ee8f8c028ec9c420f3fc3e86feb54d9377b21dd7aba972fc5a418b8ce25c"
+}

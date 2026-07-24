@@ -1,224 +1,538 @@
 #!/usr/bin/env python
-"""Train a dual-adapter LoRA style model for Stable Diffusion 1.5.
-
-The script follows the assignment contract:
-- add a custom style token, normally "<sks>"
-- train LoRA adapters for both the UNet and CLIP text encoder
-- save a single file: output_dir/pytorch_lora_weights.safetensors
-"""
+"""Train the final dual-adapter Stable Diffusion 1.5 style LoRA."""
 
 from __future__ import annotations
 
 import argparse
-import gc
-import math
+import hashlib
+import importlib.metadata
+import json
 import os
+import platform
 import random
 import shutil
+import struct
+import sys
+import time
+from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Iterable
 
 import torch
 import torch.nn.functional as F
 from PIL import Image, ImageOps
 from safetensors import safe_open
-from safetensors.torch import load_file, save_file
-from torch.utils.data import DataLoader, Dataset
+from safetensors.torch import load_file
+from torch.utils.data import DataLoader, Dataset, Sampler
 from torchvision import transforms
+from torchvision.transforms import functional as TF
 from tqdm.auto import tqdm
 
-try:
-    from diffusers import AutoencoderKL, DDPMScheduler, StableDiffusionPipeline, UNet2DConditionModel
-    from diffusers.optimization import get_scheduler
-    from diffusers.utils import convert_state_dict_to_diffusers
-except ImportError as exc:  # pragma: no cover - exercised in a fresh env before install.
-    raise SystemExit(
-        "Missing Diffusers dependencies. Install them with: pip install -r requirements.txt"
-    ) from exc
+from diffusers import AutoencoderKL, DDPMScheduler, StableDiffusionPipeline, UNet2DConditionModel
+from diffusers.optimization import get_scheduler
+from diffusers.utils import (
+    convert_state_dict_to_diffusers,
+    convert_state_dict_to_peft,
+    convert_unet_state_dict_to_peft,
+)
+from peft import LoraConfig
+from peft.utils import get_peft_model_state_dict, set_peft_model_state_dict
+from transformers import AutoTokenizer, CLIPTextModel
 
-try:
-    from peft import LoraConfig
-    from peft.utils import get_peft_model_state_dict
-except ImportError as exc:  # pragma: no cover
-    raise SystemExit("Missing PEFT. Install it with: pip install -r requirements.txt") from exc
-
-try:
-    from transformers import AutoTokenizer, CLIPTextModel
-except ImportError as exc:  # pragma: no cover
-    raise SystemExit("Missing Transformers. Install it with: pip install -r requirements.txt") from exc
+from token_utils import setup_custom_token
 
 
-SUPPORTED_EXTENSIONS = {".bmp", ".jpeg", ".jpg", ".png", ".webp"}
-LORA_FILENAME = "pytorch_lora_weights.safetensors"
-CUSTOM_TOKEN_EMBEDDING_KEY = "__custom_token_embedding__"
+IMAGE_EXTENSIONS = {".bmp", ".jpeg", ".jpg", ".png", ".webp"}
+WEIGHTS_NAME = "pytorch_lora_weights.safetensors"
+TOKEN_KEY = "__custom_token_embedding__"
+GENERIC_PROMPT = "an animated movie scene, in {token} style"
+TARGET_PROMPT = "a busy market, in {token} style"
+SAFETENSOR_DTYPES = {
+    torch.bool: "BOOL",
+    torch.uint8: "U8",
+    torch.int8: "I8",
+    torch.int16: "I16",
+    torch.int32: "I32",
+    torch.int64: "I64",
+    torch.float16: "F16",
+    torch.bfloat16: "BF16",
+    torch.float32: "F32",
+    torch.float64: "F64",
+}
 
 
-class StyleImageDataset(Dataset):
+def derive_seed(master_seed: int, namespace: str, index: int) -> int:
+    value = f"{master_seed}:{namespace}:{index}".encode("utf-8")
+    return int.from_bytes(hashlib.sha256(value).digest()[:8], "big") & ((1 << 63) - 1)
+
+
+def file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def save_canonical_safetensors(
+    tensors: dict[str, torch.Tensor],
+    path: Path,
+    metadata: dict[str, str],
+) -> None:
+    header = {"__metadata__": dict(sorted(metadata.items()))}
+    chunks = []
+    offset = 0
+    for name, tensor in sorted(tensors.items()):
+        value = tensor.detach().cpu().contiguous()
+        if value.dtype not in SAFETENSOR_DTYPES:
+            raise TypeError(f"Unsupported Safetensors dtype: {value.dtype}")
+        chunk = value.view(torch.uint8).numpy().tobytes()
+        header[name] = {
+            "dtype": SAFETENSOR_DTYPES[value.dtype],
+            "shape": list(value.shape),
+            "data_offsets": [offset, offset + len(chunk)],
+        }
+        chunks.append(chunk)
+        offset += len(chunk)
+    header_bytes = json.dumps(
+        header,
+        ensure_ascii=True,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+    header_bytes += b" " * (-len(header_bytes) % 8)
+    temporary = path.with_suffix(".tmp")
+    with temporary.open("wb") as handle:
+        handle.write(struct.pack("<Q", len(header_bytes)))
+        handle.write(header_bytes)
+        for chunk in chunks:
+            handle.write(chunk)
+    os.replace(temporary, path)
+
+
+def directory_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    files = sorted(
+        item for item in path.rglob("*")
+        if item.is_file() and item.suffix.lower() in IMAGE_EXTENSIONS
+    )
+    for item in files:
+        digest.update(item.relative_to(path).as_posix().encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(file_sha256(item).encode("ascii"))
+        digest.update(b"\n")
+    return digest.hexdigest()
+
+
+def portable_path(path: Path) -> str:
+    resolved = path.resolve()
+    try:
+        return resolved.relative_to(Path.cwd().resolve()).as_posix()
+    except ValueError:
+        return str(resolved)
+
+
+def json_sha256(value: object) -> str:
+    payload = json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def write_json(path: Path, value: object) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(value, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
+def write_jsonl(path: Path, rows: list[dict[str, object]]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = "".join(json.dumps(row, sort_keys=True) + "\n" for row in rows)
+    path.write_text(payload, encoding="utf-8")
+
+
+def append_jsonl(path: Path, rows: list[dict[str, object]]) -> None:
+    if not rows:
+        return
+    with path.open("a", encoding="utf-8") as handle:
+        for row in rows:
+            handle.write(json.dumps(row, sort_keys=True) + "\n")
+        handle.flush()
+        os.fsync(handle.fileno())
+
+
+def truncate_jsonl(path: Path, step: int, key: str) -> None:
+    if not path.exists():
+        return
+    rows = [
+        row for row in read_jsonl(path)
+        if int(row[key]) <= step
+    ]
+    write_jsonl(path, rows)
+
+
+def read_jsonl(path: Path) -> list[dict[str, object]]:
+    with path.open("r", encoding="utf-8") as handle:
+        return [json.loads(line) for line in handle if line.strip()]
+
+
+def resolve_manifest_path(manifest: Path, value: str) -> Path:
+    path = Path(value)
+    candidates = [path, manifest.parent / path]
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate.resolve()
+    return (manifest.parent / path).resolve()
+
+
+def load_captions(path: Path) -> dict[Path, str]:
+    captions: dict[Path, str] = {}
+    for row in read_jsonl(path):
+        image_path = resolve_manifest_path(path, str(row["image"]))
+        caption = str(row["caption"]).strip().rstrip(".,")
+        if not caption:
+            raise ValueError(f"Empty caption for {image_path}")
+        if image_path in captions:
+            raise ValueError(f"Duplicate caption for {image_path}")
+        captions[image_path] = caption
+    return captions
+
+
+@dataclass(frozen=True)
+class Example:
+    image_path: Path
+    caption: str
+    source_kind: str
+    sampling_weight: float
+    target_prompt_prob: float
+
+
+def load_auxiliary_examples(path: Path | None) -> list[Example]:
+    if path is None:
+        return []
+    examples = []
+    seen = set()
+    for row in read_jsonl(path):
+        image_path = resolve_manifest_path(path, str(row["image"]))
+        caption = str(row["caption"]).strip().rstrip(".,")
+        source_kind = str(row["source_kind"]).strip()
+        sampling_weight = float(row["sampling_weight"])
+        target_prompt_prob = float(row.get("target_prompt_prob", 0.0))
+        if not image_path.is_file() or image_path.suffix.lower() not in IMAGE_EXTENSIONS:
+            raise FileNotFoundError(image_path)
+        if not caption or not source_kind or sampling_weight <= 0:
+            raise ValueError(f"Invalid auxiliary row for {image_path}")
+        if not 0 <= target_prompt_prob <= 1:
+            raise ValueError(f"Invalid target_prompt_prob for {image_path}")
+        if image_path in seen:
+            raise ValueError(f"Duplicate auxiliary image: {image_path}")
+        seen.add(image_path)
+        examples.append(
+            Example(
+                image_path,
+                caption,
+                source_kind,
+                sampling_weight,
+                target_prompt_prob,
+            )
+        )
+    return examples
+
+
+class StyleDataset(Dataset):
     def __init__(
         self,
         data_dir: Path,
-        tokenizer,
+        captions_jsonl: Path,
+        auxiliary_jsonl: Path | None,
         instance_token: str,
         resolution: int,
-        prompt_template: str,
-        repeats: int,
-        center_crop: bool,
+        caption_dropout_prob: float,
         random_flip: bool,
     ) -> None:
-        self.image_paths = sorted(
-            path
-            for path in data_dir.rglob("*")
-            if path.is_file() and path.suffix.lower() in SUPPORTED_EXTENSIONS
+        supplied = sorted(
+            path.resolve() for path in data_dir.iterdir()
+            if path.is_file() and path.suffix.lower() in IMAGE_EXTENSIONS
         )
-        if not self.image_paths:
-            raise ValueError(f"No supported image files found in {data_dir}")
-
-        crop = transforms.CenterCrop(resolution) if center_crop else transforms.RandomCrop(resolution)
-        image_transforms = [
-            transforms.Resize(resolution, interpolation=transforms.InterpolationMode.BILINEAR),
-            crop,
+        supplied_captions = load_captions(captions_jsonl)
+        missing_supplied = [path for path in supplied if path not in supplied_captions]
+        if missing_supplied or len(supplied_captions) != len(supplied):
+            raise ValueError(
+                f"Caption coverage mismatch: {len(supplied)} images, "
+                f"{len(supplied_captions)} captions, {len(missing_supplied)} missing"
+            )
+        self.examples = [
+            Example(path, supplied_captions[path], "supplied_full", 1.0, 0.0)
+            for path in supplied
         ]
-        if random_flip:
-            image_transforms.append(transforms.RandomHorizontalFlip())
-        image_transforms.extend(
-            [
-                transforms.ToTensor(),
-                transforms.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5]),
-            ]
-        )
-
-        self.transforms = transforms.Compose(image_transforms)
-        self.tokenizer = tokenizer
-        self.prompt = prompt_template.format(instance_token=instance_token)
-        self.repeats = max(1, repeats)
+        self.examples.extend(load_auxiliary_examples(auxiliary_jsonl))
+        self.instance_token = instance_token
+        self.resolution = resolution
+        self.caption_dropout_prob = caption_dropout_prob
+        self.random_flip = random_flip
+        self.tokenizer = None
 
     def __len__(self) -> int:
-        return len(self.image_paths) * self.repeats
+        return len(self.examples)
 
-    def __getitem__(self, index: int) -> dict[str, torch.Tensor]:
-        image_path = self.image_paths[index % len(self.image_paths)]
-        with Image.open(image_path) as image:
-            image = ImageOps.exif_transpose(image).convert("RGB")
-            pixel_values = self.transforms(image)
+    def sampling_weights(self) -> list[float]:
+        return [example.sampling_weight for example in self.examples]
 
-        input_ids = self.tokenizer(
-            self.prompt,
+    def prompts(self, example: Example, rng: random.Random) -> tuple[str, str, str]:
+        if rng.random() < example.target_prompt_prob:
+            styled = TARGET_PROMPT.format(token=self.instance_token)
+            plain = "a busy market"
+            mode = "target"
+        elif rng.random() < self.caption_dropout_prob:
+            styled = GENERIC_PROMPT.format(token=self.instance_token)
+            plain = "an animated movie scene"
+            mode = "generic"
+        else:
+            styled = f"{example.caption}, in {self.instance_token} style"
+            plain = example.caption
+            mode = "caption"
+        if styled.count(self.instance_token) != 1 or self.instance_token in plain:
+            raise ValueError(f"Invalid styled/plain prompt pair: {styled!r}, {plain!r}")
+        return styled, plain, mode
+
+    def __getitem__(self, item: tuple[int, int, int]) -> dict[str, object]:
+        dataset_index, draw_index, augmentation_seed = item
+        example = self.examples[dataset_index]
+        rng = random.Random(augmentation_seed)
+
+        with Image.open(example.image_path) as source:
+            image = ImageOps.exif_transpose(source).convert("RGB")
+        original_width, original_height = image.size
+        image = TF.resize(
+            image,
+            self.resolution,
+            interpolation=transforms.InterpolationMode.BILINEAR,
+        )
+        resized_width, resized_height = image.size
+        max_top = max(0, resized_height - self.resolution)
+        max_left = max(0, resized_width - self.resolution)
+        crop_top = rng.randint(0, max_top) if max_top else 0
+        crop_left = rng.randint(0, max_left) if max_left else 0
+        image = TF.crop(image, crop_top, crop_left, self.resolution, self.resolution)
+        flipped = self.random_flip and rng.random() < 0.5
+        if flipped:
+            image = TF.hflip(image)
+
+        styled_prompt, plain_prompt, prompt_mode = self.prompts(example, rng)
+        if self.tokenizer is None:
+            raise RuntimeError("Tokenizer has not been attached to the dataset")
+        tokenize = lambda prompt: self.tokenizer(
+            prompt,
             padding="max_length",
             truncation=True,
             max_length=self.tokenizer.model_max_length,
             return_tensors="pt",
         ).input_ids[0]
 
-        return {"pixel_values": pixel_values, "input_ids": input_ids}
+        trace = {
+            "draw_index": draw_index,
+            "dataset_index": dataset_index,
+            "augmentation_seed": augmentation_seed,
+            "source_kind": example.source_kind,
+            "source_path": portable_path(example.image_path),
+            "original_width": original_width,
+            "original_height": original_height,
+            "resized_width": resized_width,
+            "resized_height": resized_height,
+            "crop_left": crop_left,
+            "crop_top": crop_top,
+            "crop_width": self.resolution,
+            "crop_height": self.resolution,
+            "flipped": flipped,
+            "prompt_mode": prompt_mode,
+            "styled_prompt": styled_prompt,
+            "plain_prompt": plain_prompt,
+        }
+        return {
+            "pixel_values": TF.normalize(TF.to_tensor(image), [0.5] * 3, [0.5] * 3),
+            "input_ids": tokenize(styled_prompt),
+            "plain_input_ids": tokenize(plain_prompt),
+            "draw_index": torch.tensor(draw_index, dtype=torch.long),
+            "trace": json.dumps(trace, sort_keys=True),
+        }
+
+
+class DrawSampler(Sampler[tuple[int, int, int]]):
+    def __init__(self, schedule: list[dict[str, object]], offset: int = 0) -> None:
+        self.schedule = schedule[offset:]
+
+    def __iter__(self):
+        for row in self.schedule:
+            yield (
+                int(row["dataset_index"]),
+                int(row["draw_index"]),
+                int(row["augmentation_seed"]),
+            )
+
+    def __len__(self) -> int:
+        return len(self.schedule)
+
+
+def build_schedule(
+    dataset: StyleDataset,
+    total_draws: int,
+    seed: int,
+) -> list[dict[str, object]]:
+    weights = torch.tensor(dataset.sampling_weights(), dtype=torch.float64)
+    generator = torch.Generator(device="cpu").manual_seed(derive_seed(seed, "draw_schedule", 0))
+    indices = torch.multinomial(weights, total_draws, replacement=True, generator=generator).tolist()
+    rows = []
+    for draw_index, dataset_index in enumerate(indices):
+        example = dataset.examples[dataset_index]
+        rows.append(
+            {
+                "draw_index": draw_index,
+                "dataset_index": dataset_index,
+                "augmentation_seed": derive_seed(seed, "augmentation", draw_index),
+                "source_kind": example.source_kind,
+                "source_path": portable_path(example.image_path),
+                "sampling_weight": float(weights[dataset_index]),
+            }
+        )
+    return rows
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Train Stable Diffusion 1.5 LoRA adapters for a style token.")
-    parser.add_argument("--data_dir", type=Path, required=True, help="Directory of training images.")
-    parser.add_argument("--instance_token", default="<sks>", help="New tokenizer token used in prompts.")
-    parser.add_argument("--output_dir", type=Path, default=Path("lora_out"), help="Directory for the final LoRA file.")
-    parser.add_argument("--model_name", default="runwayml/stable-diffusion-v1-5", help="Base SD 1.5 model id or path.")
-    parser.add_argument("--revision", default=None, help="Optional Hugging Face model revision.")
-    parser.add_argument("--variant", default=None, help="Optional model variant, such as fp16.")
-    parser.add_argument("--rank", type=int, default=8, help="LoRA rank.")
-    parser.add_argument("--lora_alpha", type=int, default=None, help="LoRA alpha. Defaults to rank.")
-    parser.add_argument("--learning_rate", type=float, default=1e-4, help="Optimizer learning rate.")
-    parser.add_argument("--adam_beta1", type=float, default=0.9)
-    parser.add_argument("--adam_beta2", type=float, default=0.999)
-    parser.add_argument("--adam_weight_decay", type=float, default=1e-2)
-    parser.add_argument("--adam_epsilon", type=float, default=1e-8)
-    parser.add_argument("--max_grad_norm", type=float, default=1.0)
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--data_dir", type=Path, required=True)
+    parser.add_argument("--captions_jsonl", type=Path, default=Path("code/auto_captions/florence_captions.jsonl"))
+    parser.add_argument("--auxiliary_jsonl", type=Path, default=None)
+    parser.add_argument("--instance_token", default="<sks>")
+    parser.add_argument("--token_initializer", default="ghibli style")
+    parser.add_argument("--output_dir", type=Path, default=Path("lora_out"))
+    parser.add_argument("--provenance_dir", type=Path, default=Path("training_run"))
+    parser.add_argument("--model_name", default="runwayml/stable-diffusion-v1-5")
+    parser.add_argument("--revision", default=None)
+    parser.add_argument("--rank", type=int, default=16)
+    parser.add_argument("--text_encoder_rank", type=int, default=4)
+    parser.add_argument("--learning_rate", type=float, default=8e-5)
+    parser.add_argument("--text_encoder_learning_rate", type=float, default=5e-6)
+    parser.add_argument("--token_learning_rate", type=float, default=2e-5)
+    parser.add_argument("--lora_dropout", type=float, default=0.05)
+    parser.add_argument("--caption_dropout_prob", type=float, default=0.10)
     parser.add_argument("--resolution", type=int, default=512)
+    parser.add_argument("--max_steps", type=int, default=300)
     parser.add_argument("--train_batch_size", type=int, default=1)
     parser.add_argument("--gradient_accumulation_steps", type=int, default=4)
-    parser.add_argument("--max_steps", type=int, default=800)
-    parser.add_argument("--lr_scheduler", default="constant", help="Diffusers scheduler name.")
-    parser.add_argument("--lr_warmup_steps", type=int, default=0)
+    parser.add_argument("--lr_scheduler", default="cosine")
+    parser.add_argument("--lr_warmup_steps", type=int, default=50)
+    parser.add_argument("--snr_gamma", type=float, default=5.0)
+    parser.add_argument("--preservation_loss_weight", type=float, default=0.5)
+    parser.add_argument("--token_anchor_loss_weight", type=float, default=0.05)
+    parser.add_argument("--max_grad_norm", type=float, default=1.0)
     parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--num_workers", type=int, default=0, help="Use 0 on Windows unless you need multiprocessing.")
-    parser.add_argument("--repeats", type=int, default=1, help="Virtual repeats for small datasets.")
-    parser.add_argument(
-        "--prompt_template",
-        default="an animated movie scene, in {instance_token} style",
-        help="Training prompt template. Must contain {instance_token}.",
-    )
-    parser.add_argument(
-        "--token_initializer",
-        default="style",
-        help="Phrase whose token embeddings initialize the new custom token.",
-    )
-    parser.add_argument("--center_crop", action="store_true", help="Use center crop instead of random crop.")
-    parser.add_argument("--random_flip", action="store_true", help="Apply random horizontal flips.")
-    parser.add_argument(
-        "--mixed_precision",
-        choices=["no", "fp16", "bf16"],
-        default="fp16",
-        help="Training precision. fp16 is recommended on CUDA GPUs.",
-    )
-    parser.add_argument("--gradient_checkpointing", action="store_true", help="Enable gradient checkpointing.")
-    parser.add_argument("--enable_xformers", action="store_true", help="Enable xFormers attention if installed.")
-    parser.add_argument("--allow_cpu", action="store_true", help="Allow CPU training. This is extremely slow.")
-    parser.add_argument("--overwrite", action="store_true", help="Overwrite output_dir if it already exists.")
+    parser.add_argument("--mixed_precision", choices=["fp16", "bf16", "no"], default="fp16")
+    parser.add_argument("--checkpointing_steps", type=int, default=25)
+    parser.add_argument("--stop_after_step", type=int, default=None)
+    parser.add_argument("--gradient_checkpointing", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--random_flip", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--allow_tf32", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--allow_cpu", action="store_true")
+    parser.add_argument("--init_weights", type=Path, default=None)
+    parser.add_argument("--resume", action="store_true")
+    parser.add_argument("--overwrite", action="store_true")
     return parser.parse_args()
 
 
 def validate_args(args: argparse.Namespace) -> None:
-    if "{instance_token}" not in args.prompt_template:
-        raise ValueError("--prompt_template must include {instance_token}")
-    if args.rank <= 0:
-        raise ValueError("--rank must be positive")
-    if args.max_steps <= 0:
-        raise ValueError("--max_steps must be positive")
-    if args.train_batch_size <= 0:
-        raise ValueError("--train_batch_size must be positive")
-    if args.gradient_accumulation_steps <= 0:
-        raise ValueError("--gradient_accumulation_steps must be positive")
-    if args.resolution <= 0:
-        raise ValueError("--resolution must be positive")
-    if not args.data_dir.exists():
-        raise FileNotFoundError(f"data_dir does not exist: {args.data_dir}")
-
-    if args.output_dir.exists():
-        existing_files = [path for path in args.output_dir.iterdir()]
-        if existing_files and not args.overwrite:
-            raise FileExistsError(f"{args.output_dir} is not empty. Re-run with --overwrite to replace it.")
-        if args.overwrite:
-            shutil.rmtree(args.output_dir)
-    args.output_dir.mkdir(parents=True, exist_ok=True)
-
-
-def seed_everything(seed: int) -> None:
-    random.seed(seed)
-    torch.manual_seed(seed)
-    torch.cuda.manual_seed_all(seed)
-
-
-def get_device(allow_cpu: bool) -> torch.device:
-    if torch.cuda.is_available():
-        return torch.device("cuda")
-    if allow_cpu:
-        return torch.device("cpu")
-    raise SystemExit("CUDA was not found. Training on CPU is impractical; pass --allow_cpu only for debugging.")
-
-
-def get_weight_dtype(mixed_precision: str, device: torch.device) -> torch.dtype:
-    if device.type != "cuda":
-        return torch.float32
-    if mixed_precision == "fp16":
-        return torch.float16
-    if mixed_precision == "bf16":
-        return torch.bfloat16
-    return torch.float32
-
-
-def import_model_components(args: argparse.Namespace, torch_dtype: torch.dtype):
-    common_kwargs = {
-        "pretrained_model_name_or_path": args.model_name,
-        "revision": args.revision,
+    if args.resume and args.overwrite:
+        raise ValueError("--resume and --overwrite are mutually exclusive")
+    if not args.data_dir.is_dir():
+        raise FileNotFoundError(args.data_dir)
+    if not args.captions_jsonl.is_file():
+        raise FileNotFoundError(args.captions_jsonl)
+    if args.auxiliary_jsonl is not None and not args.auxiliary_jsonl.is_file():
+        raise FileNotFoundError(args.auxiliary_jsonl)
+    if args.init_weights is not None and not args.init_weights.is_file():
+        raise FileNotFoundError(args.init_weights)
+    positive = {
+        "rank": args.rank,
+        "text_encoder_rank": args.text_encoder_rank,
+        "resolution": args.resolution,
+        "max_steps": args.max_steps,
+        "train_batch_size": args.train_batch_size,
+        "gradient_accumulation_steps": args.gradient_accumulation_steps,
     }
-    if args.variant is not None:
-        common_kwargs["variant"] = args.variant
+    for name, value in positive.items():
+        if value <= 0:
+            raise ValueError(f"--{name} must be positive")
+    for name in ("caption_dropout_prob", "lora_dropout"):
+        value = getattr(args, name)
+        if not 0 <= value <= 1:
+            raise ValueError(f"--{name} must be between 0 and 1")
+    if args.output_dir.resolve() == args.provenance_dir.resolve():
+        raise ValueError("Output and provenance directories must be different")
+    if args.stop_after_step is not None and not 1 <= args.stop_after_step <= args.max_steps:
+        raise ValueError("--stop_after_step must be between 1 and --max_steps")
 
+
+def prepare_directories(args: argparse.Namespace) -> Path:
+    state_path = args.provenance_dir / "latest_training_state.pt"
+    if args.overwrite:
+        for path in (args.output_dir, args.provenance_dir):
+            if path.exists():
+                shutil.rmtree(path)
+    elif args.resume:
+        if not state_path.is_file():
+            raise FileNotFoundError(state_path)
+    elif args.output_dir.exists() or args.provenance_dir.exists():
+        raise FileExistsError("Output exists; pass --overwrite or --resume")
+    args.provenance_dir.mkdir(parents=True, exist_ok=True)
+    return state_path
+
+
+def package_versions() -> dict[str, str]:
+    versions = {}
+    for package in ("torch", "torchvision", "diffusers", "peft", "transformers", "safetensors"):
+        versions[package] = importlib.metadata.version(package)
+    return versions
+
+
+def run_config(args: argparse.Namespace, schedule: list[dict[str, object]], schedule_hash: str) -> dict:
+    arguments = {
+        key: portable_path(value) if isinstance(value, Path) else value
+        for key, value in sorted(vars(args).items())
+        if key not in {"overwrite", "resume", "stop_after_step", "output_dir", "provenance_dir"}
+    }
+    counts: dict[str, int] = {}
+    for row in schedule:
+        kind = str(row["source_kind"])
+        counts[kind] = counts.get(kind, 0) + 1
+    contract = {
+        "arguments": arguments,
+        "input_hashes": {
+            "data_dir": directory_sha256(args.data_dir),
+            "captions_jsonl": file_sha256(args.captions_jsonl),
+            "auxiliary_jsonl": file_sha256(args.auxiliary_jsonl) if args.auxiliary_jsonl else None,
+            "init_weights": file_sha256(args.init_weights) if args.init_weights else None,
+            "train_script": file_sha256(Path(__file__)),
+        },
+        "schedule_sha256": schedule_hash,
+        "environment": {
+            "python": sys.version,
+            "platform": platform.platform(),
+            "packages": package_versions(),
+            "torch_cuda": torch.version.cuda,
+            "gpu": torch.cuda.get_device_name(0) if torch.cuda.is_available() else None,
+            "deterministic_algorithms": True,
+        },
+    }
+    return {
+        "format_version": 1,
+        "created_utc": datetime.now(timezone.utc).isoformat(),
+        "command": sys.argv,
+        "contract": contract,
+        "contract_sha256": json_sha256(contract),
+        "source_summary": {
+            "total_draws": len(schedule),
+            "draws_by_source_kind": counts,
+        },
+    }
+
+
+def load_models(args: argparse.Namespace, dtype: torch.dtype):
     tokenizer = AutoTokenizer.from_pretrained(
         args.model_name,
         subfolder="tokenizer",
@@ -228,20 +542,20 @@ def import_model_components(args: argparse.Namespace, torch_dtype: torch.dtype):
     text_encoder = CLIPTextModel.from_pretrained(
         args.model_name,
         subfolder="text_encoder",
-        torch_dtype=torch_dtype,
-        **{k: v for k, v in common_kwargs.items() if k != "pretrained_model_name_or_path"},
+        revision=args.revision,
+        torch_dtype=dtype,
     )
     vae = AutoencoderKL.from_pretrained(
         args.model_name,
         subfolder="vae",
-        torch_dtype=torch_dtype,
-        **{k: v for k, v in common_kwargs.items() if k != "pretrained_model_name_or_path"},
+        revision=args.revision,
+        torch_dtype=dtype,
     )
     unet = UNet2DConditionModel.from_pretrained(
         args.model_name,
         subfolder="unet",
-        torch_dtype=torch_dtype,
-        **{k: v for k, v in common_kwargs.items() if k != "pretrained_model_name_or_path"},
+        revision=args.revision,
+        torch_dtype=dtype,
     )
     noise_scheduler = DDPMScheduler.from_pretrained(
         args.model_name,
@@ -251,286 +565,621 @@ def import_model_components(args: argparse.Namespace, torch_dtype: torch.dtype):
     return tokenizer, text_encoder, vae, unet, noise_scheduler
 
 
-def setup_custom_token(tokenizer, text_encoder, instance_token: str, initializer: str) -> int:
-    num_added = tokenizer.add_tokens([instance_token])
-    token_id = tokenizer.convert_tokens_to_ids(instance_token)
-    if token_id is None or token_id == tokenizer.unk_token_id:
-        raise ValueError(f"Could not add or resolve instance token: {instance_token}")
-
-    tokenized = tokenizer(instance_token, add_special_tokens=False).input_ids
-    if len(tokenized) != 1:
-        raise ValueError(f"{instance_token!r} must tokenize to one id after insertion, got {tokenized}")
-
-    if num_added:
-        text_encoder.resize_token_embeddings(len(tokenizer))
-
-    initializer_ids = tokenizer(initializer, add_special_tokens=False).input_ids
-    initializer_ids = [idx for idx in initializer_ids if idx != token_id]
-    if not initializer_ids:
-        raise ValueError("--token_initializer must tokenize to at least one existing token")
-
-    embedding = text_encoder.get_input_embeddings().weight
-    with torch.no_grad():
-        initializer_tensor = torch.tensor(initializer_ids, device=embedding.device)
-        embedding[token_id].copy_(embedding[initializer_tensor].mean(dim=0))
-
-    return token_id
-
-
-def freeze_models(*models) -> None:
-    for model in models:
-        model.requires_grad_(False)
-        model.eval()
-
-
-def add_lora_adapters(unet, text_encoder, rank: int, alpha: int) -> None:
-    unet_config = LoraConfig(
-        r=rank,
-        lora_alpha=alpha,
-        init_lora_weights="gaussian",
-        target_modules=["to_q", "to_k", "to_v", "to_out.0"],
+def add_adapters(unet, text_encoder, args: argparse.Namespace) -> None:
+    unet.add_adapter(
+        LoraConfig(
+            r=args.rank,
+            lora_alpha=args.rank,
+            lora_dropout=args.lora_dropout,
+            init_lora_weights="gaussian",
+            target_modules=["to_q", "to_k", "to_v", "to_out.0"],
+        )
     )
-    text_encoder_config = LoraConfig(
-        r=rank,
-        lora_alpha=alpha,
-        init_lora_weights="gaussian",
-        target_modules=["q_proj", "k_proj", "v_proj", "out_proj"],
+    text_encoder.add_adapter(
+        LoraConfig(
+            r=args.text_encoder_rank,
+            lora_alpha=args.text_encoder_rank,
+            lora_dropout=args.lora_dropout,
+            init_lora_weights="gaussian",
+            target_modules=["q_proj", "k_proj", "v_proj", "out_proj"],
+        )
     )
-    unet.add_adapter(unet_config)
-    text_encoder.add_adapter(text_encoder_config)
 
 
-def cast_trainable_parameters(models: Iterable[torch.nn.Module], dtype: torch.dtype) -> None:
-    for model in models:
-        for param in model.parameters():
-            if param.requires_grad:
-                param.data = param.data.to(dtype)
+def train_token_row(text_encoder, token_id: int, device: torch.device):
+    embedding = text_encoder.get_input_embeddings()
+    embedding.weight.requires_grad_(False)
+    parameter = torch.nn.Parameter(embedding.weight[token_id].detach().float().to(device).clone())
+
+    def inject(_module, inputs, output):
+        mask = inputs[0].eq(token_id).unsqueeze(-1)
+        base = embedding.weight[token_id].detach().to(output)
+        learned = parameter.to(output)
+        return output + mask.to(output) * (learned - base)
+
+    return parameter, embedding.register_forward_hook(inject)
 
 
-def enable_token_row_training(text_encoder, token_id: int, device: torch.device) -> torch.nn.Parameter:
-    embedding_param = text_encoder.get_input_embeddings().weight
-    embedding_param.requires_grad_(True)
-
-    row_mask = torch.zeros((embedding_param.shape[0], 1), device=device, dtype=embedding_param.dtype)
-    row_mask[token_id] = 1
-
-    def mask_embedding_grad(grad: torch.Tensor) -> torch.Tensor:
-        return grad * row_mask.to(device=grad.device, dtype=grad.dtype)
-
-    embedding_param.register_hook(mask_embedding_grad)
-    return embedding_param
+def set_adapters(unet, text_encoder, enabled: bool) -> None:
+    method = "enable_adapters" if enabled else "disable_adapters"
+    getattr(unet, method)()
+    getattr(text_encoder, method)()
 
 
-def trainable_parameters(unet, text_encoder, token_embedding_param: torch.nn.Parameter):
-    lora_params = []
-    for model in (unet, text_encoder):
-        lora_params.extend(param for param in model.parameters() if param.requires_grad and param is not token_embedding_param)
-    return lora_params
+def compute_snr(noise_scheduler, timesteps: torch.Tensor) -> torch.Tensor:
+    alphas = noise_scheduler.alphas_cumprod.to(timesteps.device, dtype=torch.float32)
+    return alphas[timesteps] / (1 - alphas[timesteps])
 
 
-def save_single_lora_file(
-    output_dir: Path,
+def diffusion_loss(
+    prediction: torch.Tensor,
+    target: torch.Tensor,
+    noise_scheduler,
+    timesteps: torch.Tensor,
+    gamma: float,
+) -> torch.Tensor:
+    error = F.mse_loss(prediction.float(), target.float(), reduction="none")
+    per_example = error.mean(dim=tuple(range(1, error.ndim)))
+    snr = compute_snr(noise_scheduler, timesteps)
+    weights = torch.minimum(snr, torch.full_like(snr, gamma)) / snr
+    return (per_example * weights).mean()
+
+
+def seeded_noise(reference: torch.Tensor, seeds: list[int]) -> torch.Tensor:
+    values = []
+    for seed in seeds:
+        generator = torch.Generator(device=reference.device).manual_seed(seed)
+        values.append(
+            torch.randn(
+                reference[0].shape,
+                generator=generator,
+                device=reference.device,
+                dtype=reference.dtype,
+            )
+        )
+    return torch.stack(values)
+
+
+def seeded_timesteps(seeds: list[int], count: int, device: torch.device) -> torch.Tensor:
+    values = []
+    for seed in seeds:
+        generator = torch.Generator(device=device).manual_seed(seed)
+        values.append(torch.randint(0, count, (1,), generator=generator, device=device))
+    return torch.cat(values).long()
+
+
+def save_adapter(
+    directory: Path,
     unet,
     text_encoder,
-    token_embedding: torch.Tensor,
-    instance_token: str,
-    model_name: str,
-    rank: int,
+    token: torch.Tensor,
+    args: argparse.Namespace,
+    metadata: dict[str, str],
 ) -> Path:
-    unet_lora_state_dict = convert_state_dict_to_diffusers(get_peft_model_state_dict(unet))
-    text_encoder_lora_state_dict = convert_state_dict_to_diffusers(get_peft_model_state_dict(text_encoder))
-
+    directory.mkdir(parents=True, exist_ok=True)
+    unet_state = convert_state_dict_to_diffusers(get_peft_model_state_dict(unet))
+    text_state = convert_state_dict_to_diffusers(get_peft_model_state_dict(text_encoder))
     StableDiffusionPipeline.save_lora_weights(
-        save_directory=str(output_dir),
-        unet_lora_layers=unet_lora_state_dict,
-        text_encoder_lora_layers=text_encoder_lora_state_dict,
+        save_directory=str(directory),
+        unet_lora_layers=unet_state,
+        text_encoder_lora_layers=text_state,
         safe_serialization=True,
     )
-
-    weights_path = output_dir / LORA_FILENAME
-    tensors = load_file(str(weights_path), device="cpu")
-    tensors[CUSTOM_TOKEN_EMBEDDING_KEY] = token_embedding.detach().float().cpu()
-
-    with safe_open(str(weights_path), framework="pt", device="cpu") as handle:
-        metadata = dict(handle.metadata() or {})
-    metadata.update(
-        {
-            "base_model": model_name,
-            "instance_token": instance_token,
+    path = directory / WEIGHTS_NAME
+    tensors = dict(sorted(load_file(str(path), device="cpu").items()))
+    tensors[TOKEN_KEY] = token.detach().float().cpu()
+    with safe_open(str(path), framework="pt", device="cpu") as handle:
+        existing_metadata = dict(sorted((handle.metadata() or {}).items()))
+    adapter_metadata = {
+            "base_model": args.model_name,
+            "instance_token": args.instance_token,
             "contains_custom_token_embedding": "true",
-            "custom_token_embedding_key": CUSTOM_TOKEN_EMBEDDING_KEY,
-            "lora_rank": str(rank),
-        }
-    )
-    save_file(tensors, str(weights_path), metadata=metadata)
-
-    for path in output_dir.iterdir():
-        if path.name != LORA_FILENAME:
-            if path.is_dir():
-                shutil.rmtree(path)
+            "custom_token_embedding_key": TOKEN_KEY,
+            "lora_rank": str(args.rank),
+            "text_encoder_lora_rank": str(args.text_encoder_rank),
+            **metadata,
+    }
+    if args.init_weights is not None:
+        adapter_metadata["initial_weights_sha256"] = file_sha256(args.init_weights)
+    existing_metadata.update(adapter_metadata)
+    save_canonical_safetensors(tensors, path, existing_metadata)
+    for extra in directory.iterdir():
+        if extra.name != WEIGHTS_NAME:
+            if extra.is_dir():
+                shutil.rmtree(extra)
             else:
-                path.unlink()
+                extra.unlink()
+    return path
 
-    return weights_path
+
+def save_state(
+    path: Path,
+    unet,
+    text_encoder,
+    token: torch.Tensor,
+    optimizer,
+    scheduler,
+    scaler,
+    step: int,
+    loss_ema: float | None,
+    schedule_hash: str,
+) -> None:
+    state = {
+        "unet": {key: value.cpu() for key, value in get_peft_model_state_dict(unet).items()},
+        "text_encoder": {
+            key: value.cpu() for key, value in get_peft_model_state_dict(text_encoder).items()
+        },
+        "token": token.detach().cpu(),
+        "optimizer": optimizer.state_dict(),
+        "scheduler": scheduler.state_dict(),
+        "scaler": scaler.state_dict(),
+        "step": step,
+        "loss_ema": loss_ema,
+        "schedule_sha256": schedule_hash,
+        "python_rng": random.getstate(),
+        "torch_rng": torch.get_rng_state(),
+        "cuda_rng": torch.cuda.get_rng_state_all() if torch.cuda.is_available() else None,
+    }
+    temporary = path.with_suffix(".tmp")
+    torch.save(state, temporary)
+    os.replace(temporary, path)
+
+
+def load_state(
+    path: Path,
+    unet,
+    text_encoder,
+    token: torch.Tensor,
+    optimizer,
+    scheduler,
+    scaler,
+    device: torch.device,
+    schedule_hash: str,
+) -> tuple[int, float | None]:
+    state = torch.load(path, map_location="cpu", weights_only=False)
+    if state["schedule_sha256"] != schedule_hash:
+        raise ValueError("Checkpoint belongs to a different draw schedule")
+    set_peft_model_state_dict(unet, state["unet"])
+    set_peft_model_state_dict(text_encoder, state["text_encoder"])
+    token.data.copy_(state["token"].to(device))
+    optimizer.load_state_dict(state["optimizer"])
+    for optimizer_state in optimizer.state.values():
+        for key, value in optimizer_state.items():
+            if torch.is_tensor(value):
+                optimizer_state[key] = value.to(device)
+    scheduler.load_state_dict(state["scheduler"])
+    scaler.load_state_dict(state["scaler"])
+    random.setstate(state["python_rng"])
+    torch.set_rng_state(state["torch_rng"])
+    if torch.cuda.is_available() and state["cuda_rng"] is not None:
+        torch.cuda.set_rng_state_all(state["cuda_rng"])
+    return int(state["step"]), state["loss_ema"]
+
+
+def load_adapter_initialization(
+    path: Path,
+    unet,
+    text_encoder,
+    token: torch.Tensor,
+    args: argparse.Namespace,
+) -> None:
+    with safe_open(str(path), framework="pt", device="cpu") as handle:
+        metadata = handle.metadata() or {}
+    expected_metadata = {
+        "base_model": args.model_name,
+        "instance_token": args.instance_token,
+        "lora_rank": str(args.rank),
+        "text_encoder_lora_rank": str(args.text_encoder_rank),
+    }
+    mismatches = {
+        key: (metadata.get(key), expected)
+        for key, expected in expected_metadata.items()
+        if metadata.get(key) != expected
+    }
+    if mismatches:
+        raise ValueError(f"Initialization metadata mismatch: {mismatches}")
+
+    tensors = load_file(str(path), device="cpu")
+    allowed = {
+        key
+        for key in tensors
+        if key == TOKEN_KEY or key.startswith("unet.") or key.startswith("text_encoder.")
+    }
+    if allowed != set(tensors):
+        raise ValueError(f"Unexpected initialization tensors: {sorted(set(tensors) - allowed)}")
+    if TOKEN_KEY not in tensors:
+        raise ValueError(f"Initialization is missing {TOKEN_KEY}")
+
+    unet_state = {
+        key[len("unet."):]: value for key, value in tensors.items() if key.startswith("unet.")
+    }
+    text_state = {
+        key[len("text_encoder."):]: value
+        for key, value in tensors.items()
+        if key.startswith("text_encoder.")
+    }
+    if not unet_state or not text_state:
+        raise ValueError("Initialization must contain both UNet and text-encoder LoRA tensors")
+
+    unet_state = convert_unet_state_dict_to_peft(unet_state)
+    text_state = convert_state_dict_to_peft(text_state)
+    set_peft_model_state_dict(unet, unet_state)
+    set_peft_model_state_dict(text_encoder, text_state)
+    token.data.copy_(tensors[TOKEN_KEY].to(device=token.device, dtype=token.dtype))
+
+    loaded_unet = get_peft_model_state_dict(unet)
+    loaded_text = get_peft_model_state_dict(text_encoder)
+    for name, expected, actual in (
+        ("UNet", unet_state, loaded_unet),
+        ("text encoder", text_state, loaded_text),
+    ):
+        if set(expected) != set(actual):
+            raise ValueError(f"{name} initialization key mismatch")
+        if any(not torch.equal(expected[key], actual[key].cpu()) for key in expected):
+            raise ValueError(f"{name} initialization tensor mismatch")
 
 
 def main() -> None:
     os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
+    os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")
     args = parse_args()
     validate_args(args)
-    seed_everything(args.seed)
+    state_path = prepare_directories(args)
 
-    device = get_device(args.allow_cpu)
-    weight_dtype = get_weight_dtype(args.mixed_precision, device)
-    alpha = args.lora_alpha if args.lora_alpha is not None else args.rank
+    random.seed(args.seed)
+    torch.manual_seed(args.seed)
+    torch.cuda.manual_seed_all(args.seed)
+    torch.use_deterministic_algorithms(True)
+    torch.backends.cudnn.benchmark = False
+    torch.backends.cudnn.deterministic = True
 
-    print(f"Loading base model: {args.model_name}")
-    tokenizer, text_encoder, vae, unet, noise_scheduler = import_model_components(args, weight_dtype)
+    if torch.cuda.is_available():
+        device = torch.device("cuda")
+    elif args.allow_cpu:
+        device = torch.device("cpu")
+    else:
+        raise RuntimeError("CUDA is required for full training; pass --allow_cpu for a smoke test")
+    if args.allow_tf32 and device.type == "cuda":
+        torch.backends.cuda.matmul.allow_tf32 = True
+        torch.backends.cuda.enable_flash_sdp(False)
+        torch.backends.cuda.enable_mem_efficient_sdp(False)
+        torch.backends.cuda.enable_math_sdp(True)
+    if args.mixed_precision == "fp16" and device.type == "cuda":
+        dtype = torch.float16
+    elif args.mixed_precision == "bf16" and device.type == "cuda":
+        dtype = torch.bfloat16
+    else:
+        dtype = torch.float32
 
-    token_id = setup_custom_token(tokenizer, text_encoder, args.instance_token, args.token_initializer)
-    freeze_models(vae, unet, text_encoder)
-    add_lora_adapters(unet, text_encoder, rank=args.rank, alpha=alpha)
-
-    vae.to(device, dtype=weight_dtype)
-    unet.to(device, dtype=weight_dtype)
-    text_encoder.to(device, dtype=weight_dtype)
-
-    if args.gradient_checkpointing:
-        unet.enable_gradient_checkpointing()
-        text_encoder.gradient_checkpointing_enable()
-
-    if args.enable_xformers:
-        try:
-            unet.enable_xformers_memory_efficient_attention()
-        except Exception as exc:
-            raise RuntimeError("Could not enable xFormers attention. Is xformers installed?") from exc
-
-    token_embedding_param = enable_token_row_training(text_encoder, token_id, device)
-    cast_trainable_parameters([unet, text_encoder], torch.float32)
-
-    dataset = StyleImageDataset(
+    dataset = StyleDataset(
         data_dir=args.data_dir,
-        tokenizer=tokenizer,
+        captions_jsonl=args.captions_jsonl,
+        auxiliary_jsonl=args.auxiliary_jsonl,
         instance_token=args.instance_token,
         resolution=args.resolution,
-        prompt_template=args.prompt_template,
-        repeats=args.repeats,
-        center_crop=args.center_crop,
+        caption_dropout_prob=args.caption_dropout_prob,
         random_flip=args.random_flip,
     )
-    dataloader = DataLoader(
-        dataset,
-        batch_size=args.train_batch_size,
-        shuffle=True,
-        num_workers=args.num_workers,
-        pin_memory=device.type == "cuda",
-    )
+    total_draws = args.max_steps * args.gradient_accumulation_steps * args.train_batch_size
+    schedule = build_schedule(dataset, total_draws, args.seed)
+    schedule_path = args.provenance_dir / "training_draw_schedule.jsonl"
+    schedule_payload = "".join(json.dumps(row, sort_keys=True) + "\n" for row in schedule)
+    schedule_hash = hashlib.sha256(schedule_payload.encode("utf-8")).hexdigest()
+    if args.resume:
+        existing_schedule = "".join(
+            json.dumps(row, sort_keys=True) + "\n" for row in read_jsonl(schedule_path)
+        )
+        if hashlib.sha256(existing_schedule.encode("utf-8")).hexdigest() != schedule_hash:
+            raise ValueError("Existing schedule does not match this configuration")
+    else:
+        schedule_path.write_text(schedule_payload, encoding="utf-8")
+        write_json(args.provenance_dir / "run_config.json", run_config(args, schedule, schedule_hash))
 
-    lora_params = trainable_parameters(unet, text_encoder, token_embedding_param)
+    print(f"Loading {args.model_name}")
+    tokenizer, text_encoder, vae, unet, noise_scheduler = load_models(args, dtype)
+    dataset.tokenizer = tokenizer
+    token_id = setup_custom_token(tokenizer, text_encoder, args.instance_token, args.token_initializer)
+    for model in (vae, unet, text_encoder):
+        model.requires_grad_(False)
+        model.eval()
+    add_adapters(unet, text_encoder, args)
+
+    vae.to(device, dtype=dtype)
+    unet.to(device, dtype=dtype)
+    text_encoder.to(device, dtype=dtype)
+    if args.gradient_checkpointing:
+        unet.enable_gradient_checkpointing()
+        text_encoder.gradient_checkpointing_enable(
+            gradient_checkpointing_kwargs={"use_reentrant": False}
+        )
+
+    token_parameter, token_hook = train_token_row(text_encoder, token_id, device)
+    for model in (unet, text_encoder):
+        for parameter in model.parameters():
+            if parameter.requires_grad:
+                parameter.data = parameter.data.float()
+    if args.init_weights is not None and not args.resume:
+        load_adapter_initialization(
+            args.init_weights,
+            unet,
+            text_encoder,
+            token_parameter,
+            args,
+        )
+    token_anchor = token_parameter.detach().clone()
+
+    unet_parameters = [parameter for parameter in unet.parameters() if parameter.requires_grad]
+    text_parameters = [parameter for parameter in text_encoder.parameters() if parameter.requires_grad]
     optimizer = torch.optim.AdamW(
         [
-            {"params": lora_params, "weight_decay": args.adam_weight_decay},
-            {"params": [token_embedding_param], "weight_decay": 0.0},
+            {"params": unet_parameters, "lr": args.learning_rate},
+            {"params": text_parameters, "lr": args.text_encoder_learning_rate},
+            {"params": [token_parameter], "lr": args.token_learning_rate, "weight_decay": 0.0},
         ],
-        lr=args.learning_rate,
-        betas=(args.adam_beta1, args.adam_beta2),
-        eps=args.adam_epsilon,
+        betas=(0.9, 0.999),
+        weight_decay=0.01,
+        eps=1e-8,
     )
-    lr_scheduler = get_scheduler(
+    scheduler = get_scheduler(
         args.lr_scheduler,
         optimizer=optimizer,
         num_warmup_steps=args.lr_warmup_steps,
         num_training_steps=args.max_steps,
     )
+    scaler = torch.amp.GradScaler(
+        "cuda", enabled=device.type == "cuda" and args.mixed_precision == "fp16"
+    )
 
-    num_update_steps_per_epoch = math.ceil(len(dataloader) / args.gradient_accumulation_steps)
-    num_epochs = math.ceil(args.max_steps / num_update_steps_per_epoch)
-    scaler = torch.amp.GradScaler("cuda", enabled=device.type == "cuda" and args.mixed_precision == "fp16")
+    step = 0
+    loss_ema = None
+    if args.resume:
+        step, loss_ema = load_state(
+            state_path,
+            unet,
+            text_encoder,
+            token_parameter,
+            optimizer,
+            scheduler,
+            scaler,
+            device,
+            schedule_hash,
+        )
+        truncate_jsonl(args.provenance_dir / "training_trace.jsonl", step, "optimizer_step")
+        truncate_jsonl(args.provenance_dir / "training_metrics.jsonl", step, "step")
 
-    progress_bar = tqdm(total=args.max_steps, desc="Training LoRA")
-    global_step = 0
-    optimizer.zero_grad(set_to_none=True)
+    draw_offset = step * args.gradient_accumulation_steps * args.train_batch_size
+    loader = DataLoader(
+        dataset,
+        batch_size=args.train_batch_size,
+        sampler=DrawSampler(schedule, draw_offset),
+        num_workers=0,
+        pin_memory=device.type == "cuda",
+    )
+    trace_path = args.provenance_dir / "training_trace.jsonl"
+    metrics_path = args.provenance_dir / "training_metrics.jsonl"
+    if not args.resume:
+        trace_path.write_text("", encoding="utf-8")
+        metrics_path.write_text("", encoding="utf-8")
 
     unet.train()
     text_encoder.train()
+    optimizer.zero_grad(set_to_none=True)
+    progress = tqdm(total=args.max_steps, initial=step, desc="Training LoRA")
+    started = time.monotonic()
+    pending_traces: list[dict[str, object]] = []
+    style_total = preservation_total = anchor_total = objective_total = 0.0
+    accumulation = 0
+    autocast_enabled = device.type == "cuda" and args.mixed_precision != "no"
+    autocast_dtype = torch.float16 if args.mixed_precision == "fp16" else torch.bfloat16
 
-    accumulation_counter = 0
-    for _epoch in range(num_epochs):
-        for batch in dataloader:
-            pixel_values = batch["pixel_values"].to(device=device, dtype=weight_dtype)
-            input_ids = batch["input_ids"].to(device=device)
+    for batch in loader:
+        pixels = batch["pixel_values"].to(device=device, dtype=dtype)
+        input_ids = batch["input_ids"].to(device)
+        plain_ids = batch["plain_input_ids"].to(device)
+        draw_indices = [int(value) for value in batch["draw_index"].tolist()]
+        latent_seeds = [derive_seed(args.seed, "vae_latent", index) for index in draw_indices]
+        noise_seeds = [derive_seed(args.seed, "diffusion_noise", index) for index in draw_indices]
+        timestep_seeds = [derive_seed(args.seed, "timestep", index) for index in draw_indices]
 
-            with torch.no_grad():
-                latents = vae.encode(pixel_values).latent_dist.sample()
-                latents = latents * vae.config.scaling_factor
+        with torch.no_grad():
+            latent_distribution = vae.encode(pixels).latent_dist
+            latent_noise = seeded_noise(latent_distribution.mean, latent_seeds)
+            latents = latent_distribution.mean + latent_distribution.std * latent_noise
+            latents = latents * vae.config.scaling_factor
+        noise = seeded_noise(latents, noise_seeds)
+        timesteps = seeded_timesteps(
+            timestep_seeds,
+            noise_scheduler.config.num_train_timesteps,
+            device,
+        )
+        noisy_latents = noise_scheduler.add_noise(latents, noise, timesteps)
 
-            noise = torch.randn_like(latents)
-            batch_size = latents.shape[0]
-            timesteps = torch.randint(
-                0,
-                noise_scheduler.config.num_train_timesteps,
-                (batch_size,),
-                device=device,
-                dtype=torch.long,
-            )
-            noisy_latents = noise_scheduler.add_noise(latents, noise, timesteps)
-
-            autocast_enabled = device.type == "cuda" and args.mixed_precision != "no"
-            autocast_dtype = torch.float16 if args.mixed_precision == "fp16" else torch.bfloat16
-            with torch.amp.autocast(device_type=device.type, dtype=autocast_dtype, enabled=autocast_enabled):
-                encoder_hidden_states = text_encoder(input_ids, return_dict=False)[0]
-                model_pred = unet(noisy_latents, timesteps, encoder_hidden_states, return_dict=False)[0]
-                if noise_scheduler.config.prediction_type == "v_prediction":
-                    target = noise_scheduler.get_velocity(latents, noise, timesteps)
-                else:
-                    target = noise
-                loss = F.mse_loss(model_pred.float(), target.float(), reduction="mean")
-                loss = loss / args.gradient_accumulation_steps
-
-            scaler.scale(loss).backward()
-
-            accumulation_counter += 1
-            should_step = accumulation_counter % args.gradient_accumulation_steps == 0
-            if should_step:
-                scaler.unscale_(optimizer)
-                torch.nn.utils.clip_grad_norm_(
-                    [param for group in optimizer.param_groups for param in group["params"]],
-                    args.max_grad_norm,
+        preservation_loss = torch.zeros((), device=device)
+        if args.preservation_loss_weight:
+            set_adapters(unet, text_encoder, False)
+            with torch.no_grad(), torch.amp.autocast(
+                device_type=device.type,
+                dtype=autocast_dtype,
+                enabled=autocast_enabled,
+            ):
+                teacher_hidden = text_encoder(plain_ids, return_dict=False)[0]
+                teacher_prediction = unet(
+                    noisy_latents, timesteps, teacher_hidden, return_dict=False
+                )[0]
+            set_adapters(unet, text_encoder, True)
+            with torch.amp.autocast(
+                device_type=device.type,
+                dtype=autocast_dtype,
+                enabled=autocast_enabled,
+            ):
+                student_hidden = text_encoder(plain_ids, return_dict=False)[0]
+                student_prediction = unet(
+                    noisy_latents, timesteps, student_hidden, return_dict=False
+                )[0]
+                preservation_loss = F.mse_loss(
+                    student_prediction.float(), teacher_prediction.float()
                 )
-                scaler.step(optimizer)
-                scaler.update()
-                lr_scheduler.step()
-                optimizer.zero_grad(set_to_none=True)
+            scaler.scale(
+                args.preservation_loss_weight
+                * preservation_loss
+                / args.gradient_accumulation_steps
+            ).backward()
+            del teacher_hidden, teacher_prediction, student_hidden, student_prediction
 
-                global_step += 1
-                progress_bar.update(1)
-                progress_bar.set_postfix(loss=f"{loss.item() * args.gradient_accumulation_steps:.4f}")
+        with torch.amp.autocast(
+            device_type=device.type,
+            dtype=autocast_dtype,
+            enabled=autocast_enabled,
+        ):
+            hidden = text_encoder(input_ids, return_dict=False)[0]
+            prediction = unet(noisy_latents, timesteps, hidden, return_dict=False)[0]
+            target = noise
+            style_loss = diffusion_loss(
+                prediction,
+                target,
+                noise_scheduler,
+                timesteps,
+                args.snr_gamma,
+            )
+            anchor_loss = (token_parameter - token_anchor).square().sum()
+            trainable_loss = style_loss + args.token_anchor_loss_weight * anchor_loss
+        scaler.scale(trainable_loss / args.gradient_accumulation_steps).backward()
 
-                if global_step >= args.max_steps:
-                    break
+        factor = 1 / args.gradient_accumulation_steps
+        style_total += float(style_loss.detach()) * factor
+        preservation_total += float(preservation_loss.detach()) * factor
+        anchor_total += float(anchor_loss.detach()) * factor
+        objective_total += (
+            float(style_loss.detach())
+            + args.preservation_loss_weight * float(preservation_loss.detach())
+            + args.token_anchor_loss_weight * float(anchor_loss.detach())
+        ) * factor
 
-        if global_step >= args.max_steps:
+        for index, raw_trace in enumerate(batch["trace"]):
+            trace = json.loads(raw_trace)
+            trace.update(
+                {
+                    "optimizer_step": step + 1,
+                    "accumulation_index": accumulation % args.gradient_accumulation_steps,
+                    "vae_latent_seed": latent_seeds[index],
+                    "diffusion_noise_seed": noise_seeds[index],
+                    "timestep_seed": timestep_seeds[index],
+                    "timestep": int(timesteps[index]),
+                    "style_loss": float(style_loss.detach()),
+                    "preservation_loss": float(preservation_loss.detach()),
+                    "token_anchor_loss": float(anchor_loss.detach()),
+                }
+            )
+            pending_traces.append(trace)
+
+        accumulation += 1
+        if accumulation % args.gradient_accumulation_steps:
+            continue
+
+        scaler.unscale_(optimizer)
+        torch.nn.utils.clip_grad_norm_(
+            unet_parameters + text_parameters + [token_parameter], args.max_grad_norm
+        )
+        scaler.step(optimizer)
+        scaler.update()
+        scheduler.step()
+        optimizer.zero_grad(set_to_none=True)
+        step += 1
+        loss_ema = objective_total if loss_ema is None else 0.9 * loss_ema + 0.1 * objective_total
+
+        append_jsonl(trace_path, pending_traces)
+        append_jsonl(
+            metrics_path,
+            [
+                {
+                    "step": step,
+                    "style_loss": style_total,
+                    "preservation_loss": preservation_total,
+                    "token_anchor_loss": anchor_total,
+                    "objective": objective_total,
+                    "objective_ema": loss_ema,
+                    "unet_lr": optimizer.param_groups[0]["lr"],
+                    "text_encoder_lr": optimizer.param_groups[1]["lr"],
+                    "token_lr": optimizer.param_groups[2]["lr"],
+                    "elapsed_seconds": time.monotonic() - started,
+                }
+            ],
+        )
+        pending_traces = []
+        progress.update(1)
+        progress.set_postfix(objective=f"{loss_ema:.4f}")
+
+        if args.checkpointing_steps and (
+            step % args.checkpointing_steps == 0 or step == args.max_steps
+        ):
+            checkpoint = args.provenance_dir / "checkpoints" / f"step_{step:06d}"
+            save_adapter(
+                checkpoint,
+                unet,
+                text_encoder,
+                token_parameter,
+                args,
+                {"checkpoint_kind": "periodic", "training_step": str(step)},
+            )
+            save_state(
+                state_path,
+                unet,
+                text_encoder,
+                token_parameter,
+                optimizer,
+                scheduler,
+                scaler,
+                step,
+                loss_ema,
+                schedule_hash,
+            )
+
+        style_total = preservation_total = anchor_total = objective_total = 0.0
+        if step >= args.max_steps or (
+            args.stop_after_step is not None and step >= args.stop_after_step
+        ):
             break
 
-    progress_bar.close()
+    progress.close()
+    expected_step = args.stop_after_step or args.max_steps
+    if step != expected_step:
+        raise RuntimeError(f"Training stopped at step {step}, expected {expected_step}")
 
-    token_embedding = text_encoder.get_input_embeddings().weight[token_id].detach().cpu()
-    weights_path = save_single_lora_file(
-        output_dir=args.output_dir,
-        unet=unet,
-        text_encoder=text_encoder,
-        token_embedding=token_embedding,
-        instance_token=args.instance_token,
-        model_name=args.model_name,
-        rank=args.rank,
+    append_jsonl(
+        args.provenance_dir / "sessions.jsonl",
+        [
+            {
+                "completed": step == args.max_steps,
+                "ended_utc": datetime.now(timezone.utc).isoformat(),
+                "step": step,
+                "stop_after_step": args.stop_after_step,
+            }
+        ],
     )
 
-    del vae, unet, text_encoder
-    gc.collect()
-    if device.type == "cuda":
-        torch.cuda.empty_cache()
-
-    print(f"Saved final adapter: {weights_path}")
+    metadata = {
+        "training_step": str(step),
+        "seed": str(args.seed),
+        "unet_learning_rate": str(args.learning_rate),
+        "text_encoder_learning_rate": str(args.text_encoder_learning_rate),
+        "token_learning_rate": str(args.token_learning_rate),
+        "snr_gamma": str(args.snr_gamma),
+        "preservation_loss_weight": str(args.preservation_loss_weight),
+        "token_anchor_loss_weight": str(args.token_anchor_loss_weight),
+        "run_status": "complete" if step == args.max_steps else "paused",
+        "training_draw_schedule_sha256": schedule_hash,
+        "training_trace_sha256": file_sha256(trace_path),
+    }
+    weights_path = save_adapter(
+        args.output_dir,
+        unet,
+        text_encoder,
+        token_parameter,
+        args,
+        metadata,
+    )
+    token_hook.remove()
+    print(f"Saved {weights_path}")
 
 
 if __name__ == "__main__":
