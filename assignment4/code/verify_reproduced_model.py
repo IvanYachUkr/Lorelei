@@ -20,6 +20,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--reference_training_dir", type=Path, required=True)
     parser.add_argument("--data_registry", type=Path, required=True)
     parser.add_argument("--out", type=Path, required=True)
+    parser.add_argument("--selected_step", type=int)
     return parser.parse_args()
 
 
@@ -52,6 +53,7 @@ def main() -> None:
     args = parse_args()
     selected, selected_metadata = load_tensors(args.selected)
     reproduced, reproduced_metadata = load_tensors(args.reproduced)
+    selected_step = args.selected_step or int(selected_metadata["training_step"])
     keys_equal = set(selected) == set(reproduced)
     unequal = []
     max_abs_diff = 0.0
@@ -79,7 +81,7 @@ def main() -> None:
     reproduced_metrics = read_jsonl(metrics)
     reference_metrics = read_jsonl(
         args.reference_training_dir / "training_metrics.jsonl"
-    )[:150]
+    )[:selected_step]
     for row in reproduced_metrics + reference_metrics:
         row.pop("elapsed_seconds", None)
     metrics_equal = reproduced_metrics == reference_metrics
@@ -87,7 +89,7 @@ def main() -> None:
     reproduced_trace = read_jsonl(trace)
     reference_trace = read_jsonl(
         args.reference_training_dir / "training_trace.jsonl"
-    )[:600]
+    )[: selected_step * 4]
     for row in reproduced_trace + reference_trace:
         row.pop("source_path", None)
     trace_equal = reproduced_trace == reference_trace
@@ -112,6 +114,7 @@ def main() -> None:
         "schedule_equal": schedule_equal,
         "schedule_rows": line_count(schedule),
         "selected_metadata": selected_metadata,
+        "selected_step": selected_step,
         "selected_sha256": sha256(args.selected),
         "session_steps": [row["step"] for row in session_rows],
         "tensor_count": len(selected),
@@ -121,10 +124,10 @@ def main() -> None:
         "unequal_tensors": unequal,
     }
     expected = {
-        "metrics_rows": 150,
+        "metrics_rows": selected_step,
         "schedule_rows": 2000,
         "tensor_count": 353,
-        "trace_rows": 600,
+        "trace_rows": selected_step * 4,
     }
     problems = [
         f"{name}={result[name]}, expected {value}"
@@ -136,7 +139,7 @@ def main() -> None:
     for name in ("metrics_equal", "schedule_equal", "trace_equal"):
         if not result[name]:
             problems.append(f"{name}=false")
-    if result["session_steps"][-1:] != [150]:
+    if result["session_steps"][-1:] != [selected_step]:
         problems.append(f"final session step: {result['session_steps'][-1:]}")
     result["verified"] = not problems
     result["problems"] = problems

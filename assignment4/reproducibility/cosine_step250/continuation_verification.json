@@ -1,0 +1,22 @@
+{
+  "checkpoints": {
+    "175": {
+      "continued_sha256": "4d361fc51a2060d632a00506c532bc463ad483c5493a2ebfe67722afb74f6815",
+      "max_abs_diff": 0.0,
+      "reference_sha256": "4d361fc51a2060d632a00506c532bc463ad483c5493a2ebfe67722afb74f6815",
+      "tensor_count": 353,
+      "tensors_equal": true
+    },
+    "200": {
+      "continued_sha256": "870a677006b20ce4efc2da0d92000fed6978f4ad84b42e50b065f78b754136e4",
+      "max_abs_diff": 0.0,
+      "reference_sha256": "870a677006b20ce4efc2da0d92000fed6978f4ad84b42e50b065f78b754136e4",
+      "tensor_count": 353,
+      "tensors_equal": true
+    }
+  },
+  "metrics_equal_through_step_200": true,
+  "schedule_equal": true,
+  "trace_equal_through_step_200": true,
+  "verified": true
+}

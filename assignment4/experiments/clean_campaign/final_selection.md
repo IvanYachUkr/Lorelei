@@ -1,4 +1,4 @@
-# Clean Campaign Final Selection
+# Clean Campaign Stage Selection
 
 ## Eligible Models
 
@@ -24,9 +24,11 @@
 
 ## Selection
 
-Select Candidate B step 150:
+Select Candidate B step 150 for long-horizon continuation:
 
-`lora_out/pytorch_lora_weights.safetensors`
+`models/self_market_step150.safetensors`
 
-Training loss was used only as a stability diagnostic. The selected checkpoint is not a
-run endpoint and was chosen by the recorded visual comparisons.
+Training loss was used only as a stability diagnostic. This stage checkpoint is
+not a run endpoint and was chosen by the recorded visual comparisons. The final
+long-horizon selection is documented in
+`reproducibility/cosine_step250/final_selection.md`.

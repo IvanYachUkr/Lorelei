@@ -1,0 +1,106 @@
+{
+  "prompt": "a close portrait of a smiling market vendor, in <sks> style",
+  "seed_start": 98000,
+  "num_images": 5,
+  "num_inference_steps": 30,
+  "guidance_scale": 7.5,
+  "blind_seed": 20260725,
+  "models": [
+    {
+      "label": "submitted_150",
+      "weights": "models\\self_market_step150.safetensors",
+      "weights_sha256": "606190249fe5df2d4c36bb48552cb9837bfcc91e8388ef85abe25688ad71c788",
+      "images": [
+        {
+          "index": 0,
+          "seed": 98000,
+          "image": "long_horizon_out\\finalist_blind_face_5\\submitted_150\\adapter_00.png"
+        },
+        {
+          "index": 1,
+          "seed": 98001,
+          "image": "long_horizon_out\\finalist_blind_face_5\\submitted_150\\adapter_01.png"
+        },
+        {
+          "index": 2,
+          "seed": 98002,
+          "image": "long_horizon_out\\finalist_blind_face_5\\submitted_150\\adapter_02.png"
+        },
+        {
+          "index": 3,
+          "seed": 98003,
+          "image": "long_horizon_out\\finalist_blind_face_5\\submitted_150\\adapter_03.png"
+        },
+        {
+          "index": 4,
+          "seed": 98004,
+          "image": "long_horizon_out\\finalist_blind_face_5\\submitted_150\\adapter_04.png"
+        }
+      ]
+    },
+    {
+      "label": "cosine_250",
+      "weights": "lora_out\\pytorch_lora_weights.safetensors",
+      "weights_sha256": "fbcfb525c394f6c8f249196dae3c654a9dd08e9c232000e5bac95aba10805d8b",
+      "images": [
+        {
+          "index": 0,
+          "seed": 98000,
+          "image": "long_horizon_out\\finalist_blind_face_5\\cosine_250\\adapter_00.png"
+        },
+        {
+          "index": 1,
+          "seed": 98001,
+          "image": "long_horizon_out\\finalist_blind_face_5\\cosine_250\\adapter_01.png"
+        },
+        {
+          "index": 2,
+          "seed": 98002,
+          "image": "long_horizon_out\\finalist_blind_face_5\\cosine_250\\adapter_02.png"
+        },
+        {
+          "index": 3,
+          "seed": 98003,
+          "image": "long_horizon_out\\finalist_blind_face_5\\cosine_250\\adapter_03.png"
+        },
+        {
+          "index": 4,
+          "seed": 98004,
+          "image": "long_horizon_out\\finalist_blind_face_5\\cosine_250\\adapter_04.png"
+        }
+      ]
+    },
+    {
+      "label": "stable_225",
+      "weights": "models\\stable_cumulative_step225.safetensors",
+      "weights_sha256": "c1bcb693020b2a902eea281417137fd29db7c9013443d30ac47e724857082f8b",
+      "images": [
+        {
+          "index": 0,
+          "seed": 98000,
+          "image": "long_horizon_out\\finalist_blind_face_5\\stable_225\\adapter_00.png"
+        },
+        {
+          "index": 1,
+          "seed": 98001,
+          "image": "long_horizon_out\\finalist_blind_face_5\\stable_225\\adapter_01.png"
+        },
+        {
+          "index": 2,
+          "seed": 98002,
+          "image": "long_horizon_out\\finalist_blind_face_5\\stable_225\\adapter_02.png"
+        },
+        {
+          "index": 3,
+          "seed": 98003,
+          "image": "long_horizon_out\\finalist_blind_face_5\\stable_225\\adapter_03.png"
+        },
+        {
+          "index": 4,
+          "seed": 98004,
+          "image": "long_horizon_out\\finalist_blind_face_5\\stable_225\\adapter_04.png"
+        }
+      ]
+    }
+  ]
+}

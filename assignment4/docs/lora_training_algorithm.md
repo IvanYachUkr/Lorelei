@@ -65,7 +65,7 @@ input to the selected run.
     LoRA dropout 0.05; fp16; seed 2202; and cosine decay with 50 warmup steps.
 14. Append the realized trace and metrics only after a completed optimizer step.
 15. Save an immutable adapter and full resume state every 25 steps.
-16. Stop at step 150, the visually selected checkpoint on the fixed 500-step
+16. Stop at step 250, the visually selected checkpoint on the fixed 500-step
     schedule, and serialize UNet LoRA, text-encoder LoRA, and the token row into
     one canonical Safetensors file.
 
@@ -106,7 +106,7 @@ input to the selected run.
 2. The fixed schedule contains 2,000 draws and has a stable SHA-256.
 3. Step 25 and every later 25-step boundary has an immutable adapter and resume
    state.
-4. At step 150, the trace has 600 microbatch rows and metrics have 150 rows.
+4. At step 250, the trace has 1,000 microbatch rows and metrics have 250 rows.
 5. The final file has 353 tensors and includes `unet.*`, `text_encoder.*`, and
    `__custom_token_embedding__` keys.
 
@@ -117,7 +117,7 @@ input to the selected run.
 3. Run a real CUDA smoke test and resume test.
 4. Compare materialized and original auxiliary manifests; all output tensors
    and non-timing metrics must match.
-5. Reproduce step 150 from `training_data` and compare every tensor with the
+5. Reproduce step 250 from `training_data` and compare every tensor with the
    submitted adapter.
 6. Render and visually inspect fixed development and ten-seed holdout grids.
 7. Verify the final adapter structure, sample hashes, report page count, package

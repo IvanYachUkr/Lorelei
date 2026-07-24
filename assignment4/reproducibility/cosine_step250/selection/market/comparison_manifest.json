@@ -1,0 +1,181 @@
+{
+  "prompt": "a busy market, in <sks> style",
+  "seed_start": 97000,
+  "num_images": 10,
+  "num_inference_steps": 30,
+  "guidance_scale": 7.5,
+  "blind_seed": 20260724,
+  "models": [
+    {
+      "label": "submitted_150",
+      "weights": "models\\self_market_step150.safetensors",
+      "weights_sha256": "606190249fe5df2d4c36bb48552cb9837bfcc91e8388ef85abe25688ad71c788",
+      "images": [
+        {
+          "index": 0,
+          "seed": 97000,
+          "image": "long_horizon_out\\finalist_blind_10\\submitted_150\\adapter_00.png"
+        },
+        {
+          "index": 1,
+          "seed": 97001,
+          "image": "long_horizon_out\\finalist_blind_10\\submitted_150\\adapter_01.png"
+        },
+        {
+          "index": 2,
+          "seed": 97002,
+          "image": "long_horizon_out\\finalist_blind_10\\submitted_150\\adapter_02.png"
+        },
+        {
+          "index": 3,
+          "seed": 97003,
+          "image": "long_horizon_out\\finalist_blind_10\\submitted_150\\adapter_03.png"
+        },
+        {
+          "index": 4,
+          "seed": 97004,
+          "image": "long_horizon_out\\finalist_blind_10\\submitted_150\\adapter_04.png"
+        },
+        {
+          "index": 5,
+          "seed": 97005,
+          "image": "long_horizon_out\\finalist_blind_10\\submitted_150\\adapter_05.png"
+        },
+        {
+          "index": 6,
+          "seed": 97006,
+          "image": "long_horizon_out\\finalist_blind_10\\submitted_150\\adapter_06.png"
+        },
+        {
+          "index": 7,
+          "seed": 97007,
+          "image": "long_horizon_out\\finalist_blind_10\\submitted_150\\adapter_07.png"
+        },
+        {
+          "index": 8,
+          "seed": 97008,
+          "image": "long_horizon_out\\finalist_blind_10\\submitted_150\\adapter_08.png"
+        },
+        {
+          "index": 9,
+          "seed": 97009,
+          "image": "long_horizon_out\\finalist_blind_10\\submitted_150\\adapter_09.png"
+        }
+      ]
+    },
+    {
+      "label": "cosine_250",
+      "weights": "lora_out\\pytorch_lora_weights.safetensors",
+      "weights_sha256": "fbcfb525c394f6c8f249196dae3c654a9dd08e9c232000e5bac95aba10805d8b",
+      "images": [
+        {
+          "index": 0,
+          "seed": 97000,
+          "image": "long_horizon_out\\finalist_blind_10\\cosine_250\\adapter_00.png"
+        },
+        {
+          "index": 1,
+          "seed": 97001,
+          "image": "long_horizon_out\\finalist_blind_10\\cosine_250\\adapter_01.png"
+        },
+        {
+          "index": 2,
+          "seed": 97002,
+          "image": "long_horizon_out\\finalist_blind_10\\cosine_250\\adapter_02.png"
+        },
+        {
+          "index": 3,
+          "seed": 97003,
+          "image": "long_horizon_out\\finalist_blind_10\\cosine_250\\adapter_03.png"
+        },
+        {
+          "index": 4,
+          "seed": 97004,
+          "image": "long_horizon_out\\finalist_blind_10\\cosine_250\\adapter_04.png"
+        },
+        {
+          "index": 5,
+          "seed": 97005,
+          "image": "long_horizon_out\\finalist_blind_10\\cosine_250\\adapter_05.png"
+        },
+        {
+          "index": 6,
+          "seed": 97006,
+          "image": "long_horizon_out\\finalist_blind_10\\cosine_250\\adapter_06.png"
+        },
+        {
+          "index": 7,
+          "seed": 97007,
+          "image": "long_horizon_out\\finalist_blind_10\\cosine_250\\adapter_07.png"
+        },
+        {
+          "index": 8,
+          "seed": 97008,
+          "image": "long_horizon_out\\finalist_blind_10\\cosine_250\\adapter_08.png"
+        },
+        {
+          "index": 9,
+          "seed": 97009,
+          "image": "long_horizon_out\\finalist_blind_10\\cosine_250\\adapter_09.png"
+        }
+      ]
+    },
+    {
+      "label": "stable_225",
+      "weights": "models\\stable_cumulative_step225.safetensors",
+      "weights_sha256": "c1bcb693020b2a902eea281417137fd29db7c9013443d30ac47e724857082f8b",
+      "images": [
+        {
+          "index": 0,
+          "seed": 97000,
+          "image": "long_horizon_out\\finalist_blind_10\\stable_225\\adapter_00.png"
+        },
+        {
+          "index": 1,
+          "seed": 97001,
+          "image": "long_horizon_out\\finalist_blind_10\\stable_225\\adapter_01.png"
+        },
+        {
+          "index": 2,
+          "seed": 97002,
+          "image": "long_horizon_out\\finalist_blind_10\\stable_225\\adapter_02.png"
+        },
+        {
+          "index": 3,
+          "seed": 97003,
+          "image": "long_horizon_out\\finalist_blind_10\\stable_225\\adapter_03.png"
+        },
+        {
+          "index": 4,
+          "seed": 97004,
+          "image": "long_horizon_out\\finalist_blind_10\\stable_225\\adapter_04.png"
+        },
+        {
+          "index": 5,
+          "seed": 97005,
+          "image": "long_horizon_out\\finalist_blind_10\\stable_225\\adapter_05.png"
+        },
+        {
+          "index": 6,
+          "seed": 97006,
+          "image": "long_horizon_out\\finalist_blind_10\\stable_225\\adapter_06.png"
+        },
+        {
+          "index": 7,
+          "seed": 97007,
+          "image": "long_horizon_out\\finalist_blind_10\\stable_225\\adapter_07.png"
+        },
+        {
+          "index": 8,
+          "seed": 97008,
+          "image": "long_horizon_out\\finalist_blind_10\\stable_225\\adapter_08.png"
+        },
+        {
+          "index": 9,
+          "seed": 97009,
+          "image": "long_horizon_out\\finalist_blind_10\\stable_225\\adapter_09.png"
+        }
+      ]
+    }
+  ]
+}

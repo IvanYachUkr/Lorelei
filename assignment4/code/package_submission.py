@@ -49,12 +49,23 @@ def main() -> None:
         "code/verify_training_data.py",
         "code/verify_lora_weights.py",
         "code/verify_reproduced_model.py",
+        "code/eval_model_comparison.py",
+        "code/eval_long_horizon.py",
+        "code/run_long_horizon_campaign.py",
+        "code/verify_long_horizon.py",
         "code/make_report.py",
         "code/package_submission.py",
         "code/auto_captions/florence_captions.jsonl",
         "docs/lora_training_algorithm.md",
+        "docs/long_horizon_training_algorithm.md",
         "training_data/auxiliary.jsonl",
         "training_data/registry.json",
+        "models/README.md",
+        "models/supplied_only_step175.safetensors",
+        "models/self_market_step150.safetensors",
+        "models/balanced_people_step150.safetensors",
+        "models/market_people_refinement_step60.safetensors",
+        "models/stable_cumulative_step225.safetensors",
         "requirements.txt",
         "README.md",
         "report.pdf",
@@ -63,6 +74,10 @@ def main() -> None:
         "samples/comparisons/self_market_steps125_200.jpg",
         "samples/comparisons/balanced_people_steps125_200.jpg",
         "samples/comparisons/refinement_steps45_60.jpg",
+        "samples/comparisons/final_market_blind_97000_97004.jpg",
+        "samples/comparisons/final_market_blind_97005_97009.jpg",
+        "samples/comparisons/final_face_blind_98000_98004.jpg",
+        "samples/comparisons/final_pair_blind_98100_98104.jpg",
         "reproducibility/self_market_step150/README.md",
         "reproducibility/self_market_step150/verification.json",
         "reproducibility/self_market_step150/training/run_config.json",
@@ -78,7 +93,25 @@ def main() -> None:
         "experiments/clean_campaign/self_market/training/training_trace.jsonl",
         "experiments/clean_campaign/self_market/training/training_metrics.jsonl",
         "experiments/clean_campaign/self_market/training/sessions.jsonl",
+        "reproducibility/cosine_step250/README.md",
+        "reproducibility/cosine_step250/continuation_verification.json",
+        "reproducibility/cosine_step250/final_selection.md",
+        "reproducibility/cosine_step250/spec_audit.md",
+        "reproducibility/cosine_step250/visual_reviews.md",
+        "reproducibility/cosine_step250/training/run_config.json",
+        "reproducibility/cosine_step250/training/training_draw_schedule.jsonl",
+        "reproducibility/cosine_step250/training/training_trace.jsonl",
+        "reproducibility/cosine_step250/training/training_metrics.jsonl",
+        "reproducibility/cosine_step250/training/sessions.jsonl",
     ]
+    for suite in ("market", "face", "pair"):
+        required.extend(
+            [
+                f"reproducibility/cosine_step250/selection/{suite}/blind_visual_ranking.md",
+                f"reproducibility/cosine_step250/selection/{suite}/comparison_manifest.json",
+                f"reproducibility/cosine_step250/selection/{suite}/hidden_blind_mapping.json",
+            ]
+        )
     required.extend(f"samples/adapter_{index:02d}.png" for index in range(6))
     auxiliary_images = sorted((root / "training_data/images").glob("*.png"))
     if len(auxiliary_images) != 60:

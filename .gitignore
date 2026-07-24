@@ -3,6 +3,7 @@ tmp/
 **/__MACOSX/
 sweep_out/
 quality_out/
+assignment4/long_horizon_out/
 lora_out/
 lora_out_checkpoints/
 samples/

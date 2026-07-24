@@ -1,0 +1,26 @@
+{
+  "blind_seed": 20260725,
+  "sheets": [
+    {
+      "sheet": "blind_compare_seeds_98000_98004.jpg",
+      "sheet_sha256": "2ab733cc6380a1329414c08676ddf6cc2f6c2833b93418640be7993cd92317d3",
+      "columns": [
+        {
+          "blind_label": "A",
+          "model_label": "submitted_150",
+          "column": 0
+        },
+        {
+          "blind_label": "B",
+          "model_label": "cosine_250",
+          "column": 1
+        },
+        {
+          "blind_label": "C",
+          "model_label": "stable_225",
+          "column": 2
+        }
+      ]
+    }
+  ]
+}

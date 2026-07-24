@@ -11,7 +11,7 @@ a busy market, in <sks> style
 ```
 
 The selected adapter is `lora_out/pytorch_lora_weights.safetensors`, SHA-256
-`606190249fe5df2d4c36bb48552cb9837bfcc91e8388ef85abe25688ad71c788`.
+`fbcfb525c394f6c8f249196dae3c654a9dd08e9c232000e5bac95aba10805d8b`.
 
 ## Contents
 
@@ -23,7 +23,8 @@ The selected adapter is `lora_out/pytorch_lora_weights.safetensors`, SHA-256
 - `lora_out/pytorch_lora_weights.safetensors`: final adapter and token embedding.
 - `models`: eligible comparison checkpoints from the clean training campaign.
 - `samples`: six final images and checkpoint comparison grids.
-- `reproducibility/self_market_step150`: exact selected-run records.
+- `reproducibility/self_market_step150`: exact initialization-run records.
+- `reproducibility/cosine_step250`: selected-run records and blind reviews.
 - `docs/lora_training_algorithm.md`: training and evaluation contract.
 - `report.pdf`: two-page assignment report.
 
@@ -40,7 +41,7 @@ python -m pip install -r requirements.txt
 
 The measured environment used Python 3.12, PyTorch 2.11.0 with CUDA 12.8,
 Diffusers 0.38.0, PEFT 0.19.1, Transformers 4.57.6, and an RTX 4070 Laptop GPU.
-The selected 150-step trajectory takes about 40 minutes and approximately 8 GB
+The selected 250-step trajectory takes about 55 minutes and approximately 8 GB
 of VRAM. Stable Diffusion 1.5 downloads automatically from Hugging Face on first
 use.
 
@@ -91,8 +92,8 @@ python code\train_lora.py ^
   --auxiliary_jsonl training_data\auxiliary.jsonl ^
   --instance_token "<sks>" ^
   --token_initializer "ghibli style" ^
-  --output_dir lora_out ^
-  --provenance_dir training_run ^
+  --output_dir reproducibility\cosine_step250\reproduced_model ^
+  --provenance_dir reproducibility\cosine_step250\reproduced_training ^
   --rank 16 ^
   --text_encoder_rank 4 ^
   --learning_rate 7e-5 ^
@@ -106,7 +107,7 @@ python code\train_lora.py ^
   --lr_scheduler cosine ^
   --lr_warmup_steps 50 ^
   --max_steps 500 ^
-  --stop_after_step 150 ^
+  --stop_after_step 250 ^
   --checkpointing_steps 25 ^
   --gradient_accumulation_steps 4 ^
   --gradient_checkpointing ^
@@ -117,9 +118,9 @@ python code\train_lora.py ^
 ```
 
 `max_steps=500` fixes the complete draw schedule and cosine decay trajectory.
-`stop_after_step=150` reproduces the visually selected early checkpoint. The
+`stop_after_step=250` reproduces the visually selected checkpoint. The
 output directory contains exactly one file; checkpoints, optimizer state, and
-logs are written under `training_run`.
+logs are written under `reproducibility/cosine_step250/reproduced_training`.
 
 Resume with the same command and replace `--overwrite` with `--resume`. The
 trainer checks the stored schedule and configuration, restores optimizer,
@@ -147,8 +148,10 @@ decay. The final file stores both adapters and the learned token row.
 
 Relocating the 60 auxiliary PNGs into `training_data` was checked with two
 otherwise identical CUDA runs. Their non-timing metrics and all 353 output
-tensors were exactly equal. The full reproduced run is recorded under
-`reproducibility/self_market_step150`.
+tensors were exactly equal. The first 150 steps were independently reproduced
+tensor-for-tensor and are recorded under `reproducibility/self_market_step150`.
+The selected continuation, including its deterministic trace and reviews
+through step 500, is recorded under `reproducibility/cosine_step250`.
 
 The three fresh candidates and the refinement can also be replayed in their
 original reviewed sessions:
@@ -169,15 +172,16 @@ new checkpoint review grid. The committed records are under
 
 ## Model Selection
 
-Four clean experiments were reviewed at fixed checkpoint intervals. Loss was
-used only to detect instability; visual selection used the exact prompt and
-fixed market, people, face, portrait, style-control, and no-token prompts.
+The clean experiments and two long-horizon continuations were reviewed at fixed
+checkpoint intervals. Loss was used only to detect instability; visual selection
+used the exact prompt and fixed market, people, face, portrait, style-control,
+and no-token prompts.
 
 - **Supplied only, step 175.** Strong style transfer and readable markets, but
   scene geometry was flatter and crowd faces were simpler.
 - **Self-market, step 150.** Added a small original-SD preservation set. This
-  retained the strongest stall geometry, crowd separation, color, and prompt
-  control, and was selected.
+  retained strong stall geometry, crowd separation, color, and prompt control,
+  and became the initialization for the long run.
 - **Balanced people, step 150.** Added an 8% share of face/person crops derived
   from supplied images. Close portraits improved, but small crowd faces did not
   improve consistently and occasional faces became elongated.
@@ -185,6 +189,12 @@ fixed market, people, face, portrait, style-control, and no-token prompts.
   learning rates with the balanced data. It remained stable but did not improve
   consistently: in a blind ten-seed comparison the original step 150 won four
   seeds, the refinement won one, and five were ties.
+- **Original cosine continuation, step 250.** Continued the exact optimizer and
+  scheduler state. Market composition improved through step 250 and then
+  plateaued through step 500. This checkpoint won 11 of 20 final blind seeds.
+- **Stable continuation, cumulative step 225.** Restarted from step 150 with
+  lower learning rates and stronger preservation. It improved some crowded
+  scenes early but won only 6 of 20 final blind seeds. Step 150 won 3.
 
 All three fresh candidates produced a populated market for all ten wider-review
 seeds. Small distant faces remain limited by SD 1.5 at 512x512.
@@ -201,9 +211,9 @@ All examples use the selected model and required prompt.
 | --- | --- | --- |
 | ![Seed 84003](samples/adapter_03.png) | ![Seed 84004](samples/adapter_04.png) | ![Seed 84005](samples/adapter_05.png) |
 
-Checkpoint trajectories are in `samples/comparisons`. They show the style
-transition and the later contrast loss that led to selecting step 150 instead
-of the run endpoint.
+Checkpoint trajectories and the final blind grids are in `samples/comparisons`.
+They show the improvement through step 250 and the later plateau that made step
+250 preferable to the run endpoint.
 
 ## Verification
 
@@ -211,7 +221,7 @@ of the run endpoint.
 python -m py_compile code\train_lora.py code\eval_lora.py code\token_utils.py
 python code\verify_training_data.py --data_dir style_imgs\512 --captions_jsonl code\auto_captions\florence_captions.jsonl --auxiliary_jsonl training_data\auxiliary.jsonl
 python code\verify_lora_weights.py --weights lora_out\pytorch_lora_weights.safetensors
-python code\verify_reproduced_model.py --selected lora_out\pytorch_lora_weights.safetensors --reproduced reproducibility\self_market_step150\reproduced_model\pytorch_lora_weights.safetensors --training_dir reproducibility\self_market_step150\training --reference_training_dir experiments\clean_campaign\self_market\training --data_registry training_data\registry.json --out reproducibility\self_market_step150\verification.json
+python code\verify_reproduced_model.py --selected lora_out\pytorch_lora_weights.safetensors --reproduced reproducibility\cosine_step250\reproduced_model\pytorch_lora_weights.safetensors --training_dir reproducibility\cosine_step250\reproduced_training --reference_training_dir reproducibility\cosine_step250\training --data_registry training_data\registry.json --selected_step 250 --out reproducibility\cosine_step250\reproduction_verification.json
 python code\make_report.py --team "IvanYachUkr, Claudius, stellamoR"
 python code\package_submission.py --out assignment4_submission.zip
 ```

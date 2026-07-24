@@ -27,7 +27,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--unet_learning_rate", default="7e-5")
     parser.add_argument("--text_encoder_learning_rate", default="2.5e-6")
     parser.add_argument("--token_learning_rate", default="1e-5")
-    parser.add_argument("--selected_step", type=int, default=150)
+    parser.add_argument("--selected_step", type=int, default=250)
     return parser.parse_args()
 
 
@@ -108,7 +108,7 @@ def main() -> None:
             "No assignment-PDF image, external dataset, or adapter-generated image was used.",
             "Fixed the complete 2,000-draw source and augmentation schedule before loading the model.",
             "Used deterministic per-draw seeds for crops, flips, prompts, VAE latents, diffusion noise, and timesteps.",
-            "Selected step 150 after checkpoint reviews and a blind ten-seed comparison of the clean candidates.",
+            "Selected step 250 after long-horizon checkpoint reviews and blind market, portrait, and two-person holdouts.",
             "Used Min-SNR gamma 5, adapter-off frozen-base preservation, and a token anchor.",
             "Stored the UNet LoRA, text encoder LoRA, and learned token embedding in one safetensors file.",
         ],
@@ -129,7 +129,7 @@ def main() -> None:
         "Effective data weights: 86% supplied, 5% broad markets, 5% market characters, 4% people",
         "Min-SNR gamma 5; preservation weight 0.65; token anchor 0.05",
         "LoRA dropout 0.05; caption dropout 0.08; cosine schedule; 50 warmup steps",
-        "Registered max 500 steps; visually selected early stop at step 150",
+        "Registered max 500 steps; visually selected checkpoint at step 250",
         "Every draw logged; immutable adapters and resume state saved every 25 steps",
         f"Weights: {args.weights}",
     ]
@@ -145,9 +145,11 @@ def main() -> None:
             "Supplied-only training transferred style well but produced flatter market scenes and simpler crowd faces.",
             "Original-SD market preservation improved stall geometry, crowd separation, and target-prompt reliability.",
             "An 8% supplied-image face-crop share improved close portraits but not small crowd faces consistently.",
-            "A low-rate face refinement remained stable but lost the blind holdout comparison to the selected checkpoint.",
-            "All ten final holdout seeds produced populated markets; distant faces remain limited at 512x512.",
-            "A full self-contained reproduction matched every submitted adapter tensor exactly.",
+            "The original cosine path improved through step 250 and then converged without further visual gains through step 500.",
+            "A stronger-preservation continuation peaked at cumulative step 225 but lost the final blind comparison.",
+            "Across 20 blind holdout seeds, step 250 won 11, the preserved continuation won 6, and step 150 won 3.",
+            "All ten final market holdouts were populated; distant faces remain limited at 512x512.",
+            "The reproduced initialization and continuation checks matched all 353 tensors at verified boundaries.",
         ],
         margin,
         y - 30,

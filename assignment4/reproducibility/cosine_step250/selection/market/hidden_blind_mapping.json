@@ -1,0 +1,47 @@
+{
+  "blind_seed": 20260724,
+  "sheets": [
+    {
+      "sheet": "blind_compare_seeds_97000_97004.jpg",
+      "sheet_sha256": "8172122a668dd06653e47e3e6dd3bba23d0d81d739c7d00e39a1330bdef902bf",
+      "columns": [
+        {
+          "blind_label": "A",
+          "model_label": "stable_225",
+          "column": 0
+        },
+        {
+          "blind_label": "B",
+          "model_label": "submitted_150",
+          "column": 1
+        },
+        {
+          "blind_label": "C",
+          "model_label": "cosine_250",
+          "column": 2
+        }
+      ]
+    },
+    {
+      "sheet": "blind_compare_seeds_97005_97009.jpg",
+      "sheet_sha256": "6766207a9dcf0dc839ec911f61351115c504789b657028d51e9b5aeb669e570a",
+      "columns": [
+        {
+          "blind_label": "A",
+          "model_label": "submitted_150",
+          "column": 0
+        },
+        {
+          "blind_label": "B",
+          "model_label": "stable_225",
+          "column": 1
+        },
+        {
+          "blind_label": "C",
+          "model_label": "cosine_250",
+          "column": 2
+        }
+      ]
+    }
+  ]
+}

@@ -8,10 +8,10 @@
     "instance_token": "<sks>",
     "lora_rank": "16",
     "text_encoder_lora_rank": "4",
-    "training_step": "150"
+    "training_step": "250"
   },
   "adapter_path": "C:\\Users\\vanya\\Documents\\DeepLearningFinalGroup\\assignment4\\lora_out\\pytorch_lora_weights.safetensors",
-  "adapter_sha256": "606190249fe5df2d4c36bb48552cb9837bfcc91e8388ef85abe25688ad71c788",
+  "adapter_sha256": "fbcfb525c394f6c8f249196dae3c654a9dd08e9c232000e5bac95aba10805d8b",
   "base_model": "runwayml/stable-diffusion-v1-5",
   "base_model_commit": null,
   "base_model_revision": null,
@@ -23,7 +23,7 @@
     "--prompt",
     "a busy market, in <sks> style",
     "--outdir",
-    "samples\\final_clean",
+    "samples",
     "--num_images",
     "6",
     "--seed",
@@ -33,7 +33,7 @@
     "--guidance_scale",
     "7.5"
   ],
-  "created_utc": "2026-07-24T13:56:38.059124+00:00",
+  "created_utc": "2026-07-24T21:44:48.932621+00:00",
   "deterministic_algorithms": true,
   "device": "cuda",
   "dtype": "torch.float16",
@@ -47,42 +47,42 @@
       "kind": "adapter",
       "path": "adapter_00.png",
       "seed": 84000,
-      "sha256": "d1e64acb8a1753b2c0fd144853ec95a842eeec74acbf3664e5e97eda7e90c395"
+      "sha256": "7f37e613443708d906b77e8e7a132d7ba26baf870339bf285c3b270a68c19c65"
     },
     {
       "index": 1,
       "kind": "adapter",
       "path": "adapter_01.png",
       "seed": 84001,
-      "sha256": "ff7e16c701bb0b32e42fa59663188d28d97527c5fcbe2eb706aed421b291153a"
+      "sha256": "a3c58ea6988f258f32c7e92c870383a421f4888a18c4a5dfb730e966505ac29b"
     },
     {
       "index": 2,
       "kind": "adapter",
       "path": "adapter_02.png",
       "seed": 84002,
-      "sha256": "0acc96d8a232b94fa98ac36f42c633dd63d4b4c8f905dd236a675b003e0003be"
+      "sha256": "b1c4032524c894af40d876fde8413e5204eaac0dc14b7a228940d741ffafd9ab"
     },
     {
       "index": 3,
       "kind": "adapter",
       "path": "adapter_03.png",
       "seed": 84003,
-      "sha256": "af311861ad0c150505045a7c6c7125f088f2367f4c63b3b06a52a6b5cb9b345f"
+      "sha256": "368199616456d14cc2acc0acb9382c8f6093b816aa0b7cb30ccbbec681aa6204"
     },
     {
       "index": 4,
       "kind": "adapter",
       "path": "adapter_04.png",
       "seed": 84004,
-      "sha256": "b6c82c31124f23462312e316c71bbd1f10a3adf4abf15d5ba82822503c55c7b7"
+      "sha256": "05dfa540309ad23081c52bb903ce9870b76b218e5e4a4765ccd5ff2a7260acf0"
     },
     {
       "index": 5,
       "kind": "adapter",
       "path": "adapter_05.png",
       "seed": 84005,
-      "sha256": "145a983a9c729b9db56c1a97f07b4c34f3be2229c31b2577f5cc3626db4111af"
+      "sha256": "e35ba905ac658245c70ee442dfa47227ff4347968c8882b8aa29f9bf229892f9"
     }
   ],
   "instance_token": "<sks>",
@@ -103,28 +103,28 @@
     "_class_name": "DPMSolverMultistepScheduler",
     "_diffusers_version": "0.6.0",
     "_use_default_values": [
-      "use_exponential_sigmas",
-      "rescale_betas_zero_snr",
-      "variance_type",
-      "lower_order_final",
-      "sample_max_value",
       "solver_order",
-      "use_karras_sigmas",
-      "prediction_type",
-      "final_sigmas_type",
-      "dynamic_thresholding_ratio",
-      "flow_shift",
-      "lambda_min_clipped",
-      "time_shift_type",
-      "solver_type",
-      "timestep_spacing",
-      "use_beta_sigmas",
-      "use_lu_lambdas",
-      "thresholding",
-      "algorithm_type",
-      "euler_at_final",
       "use_flow_sigmas",
-      "use_dynamic_shifting"
+      "final_sigmas_type",
+      "use_karras_sigmas",
+      "solver_type",
+      "use_dynamic_shifting",
+      "timestep_spacing",
+      "use_exponential_sigmas",
+      "variance_type",
+      "algorithm_type",
+      "time_shift_type",
+      "dynamic_thresholding_ratio",
+      "prediction_type",
+      "sample_max_value",
+      "lambda_min_clipped",
+      "thresholding",
+      "lower_order_final",
+      "flow_shift",
+      "euler_at_final",
+      "rescale_betas_zero_snr",
+      "use_beta_sigmas",
+      "use_lu_lambdas"
     ],
     "algorithm_type": "dpmsolver++",
     "beta_end": 0.012,
