@@ -1,6 +1,6 @@
 # Stable Diffusion 1.5 Style LoRA
 
-Team members: IvanYachUkr, Claudius, stellamoR.
+Team members: Ivan Iachnyk, Claudius Kühn, Robin Sternberg, Arham Shahzad, Clemens Rosskopf.
 
 This project fine-tunes Stable Diffusion 1.5 with LoRA adapters on both the UNet
 and CLIP text encoder. It also adds `<sks>` as one tokenizer token and trains its
