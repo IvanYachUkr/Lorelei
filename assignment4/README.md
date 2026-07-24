@@ -202,5 +202,5 @@ python code\make_report.py --team "Ivan Iachnyk, Claudius Kühn, Robin Sternberg
 python code\package_submission.py --out assignment4_submission.zip
 ```
 
-The packager writes only the files required by the assignment and checks the ZIP
-CRC.
+The packager writes the assignment deliverables and the exact selected-run
+training inputs, then checks the ZIP CRC.

@@ -76,9 +76,10 @@ def read_jsonl(path):
 
 def resolve_image(manifest, value):
     path = Path(value)
-    if path.exists():
-        return path.resolve()
-    return (manifest.parent / path).resolve()
+    relative_to_manifest = (manifest.parent / path).resolve()
+    if relative_to_manifest.exists():
+        return relative_to_manifest
+    return path.resolve()
 
 
 def load_examples(args):
