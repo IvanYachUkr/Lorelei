@@ -222,7 +222,7 @@ python -m py_compile code\train_lora.py code\eval_lora.py code\token_utils.py
 python code\verify_training_data.py --data_dir style_imgs\512 --captions_jsonl code\auto_captions\florence_captions.jsonl --auxiliary_jsonl training_data\auxiliary.jsonl
 python code\verify_lora_weights.py --weights lora_out\pytorch_lora_weights.safetensors
 python code\verify_reproduced_model.py --selected lora_out\pytorch_lora_weights.safetensors --reproduced reproducibility\cosine_step250\reproduced_model\pytorch_lora_weights.safetensors --training_dir reproducibility\cosine_step250\reproduced_training --reference_training_dir reproducibility\cosine_step250\training --data_registry training_data\registry.json --selected_step 250 --out reproducibility\cosine_step250\reproduction_verification.json
-python code\make_report.py --team "IvanYachUkr, Claudius, stellamoR"
+python code\make_report.py --team "Ivan Iachnyk, Claudius Kühn, Robin Sternberg, Arham Shahzad, Clemens Rosskopf"
 python code\package_submission.py --out assignment4_submission.zip
 ```
 
