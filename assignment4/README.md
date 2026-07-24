@@ -15,7 +15,7 @@ The selected adapter is `lora_out/pytorch_lora_weights.safetensors`, SHA-256
 
 ## Contents
 
-- `code/train_lora.py`: deterministic dual-LoRA training and resume support.
+- `code/train_lora.py`: direct dual-LoRA training script.
 - `code/eval_lora.py`: deterministic sample generation with no adapter-scale option.
 - `training_data`: 60 self-contained auxiliary images and their provenance manifest.
 - `experiment_data`: 96 supplied-image crops used by the balanced-data experiment.
@@ -93,7 +93,6 @@ python code\train_lora.py ^
   --instance_token "<sks>" ^
   --token_initializer "ghibli style" ^
   --output_dir reproducibility\cosine_step250\reproduced_model ^
-  --provenance_dir reproducibility\cosine_step250\reproduced_training ^
   --rank 16 ^
   --text_encoder_rank 4 ^
   --learning_rate 7e-5 ^
@@ -104,11 +103,9 @@ python code\train_lora.py ^
   --snr_gamma 5.0 ^
   --preservation_loss_weight 0.65 ^
   --token_anchor_loss_weight 0.05 ^
-  --lr_scheduler cosine ^
   --lr_warmup_steps 50 ^
-  --max_steps 500 ^
-  --stop_after_step 250 ^
-  --checkpointing_steps 25 ^
+  --max_steps 250 ^
+  --scheduler_steps 500 ^
   --gradient_accumulation_steps 4 ^
   --gradient_checkpointing ^
   --random_flip ^
@@ -117,15 +114,9 @@ python code\train_lora.py ^
   --overwrite
 ```
 
-`max_steps=500` fixes the complete draw schedule and cosine decay trajectory.
-`stop_after_step=250` reproduces the visually selected checkpoint. The
-output directory contains exactly one file; checkpoints, optimizer state, and
-logs are written under `reproducibility/cosine_step250/reproduced_training`.
-
-Resume with the same command and replace `--overwrite` with `--resume`. The
-trainer checks the stored schedule and configuration, restores optimizer,
-scheduler, scaler, token, Python and CUDA RNG states, and truncates any partial
-log tail before continuing.
+`scheduler_steps=500` fixes the original draw schedule and cosine decay
+trajectory while `max_steps=250` stops at the visually selected point. The
+output directory contains exactly one Safetensors file.
 
 ## Reproducibility
 
@@ -135,10 +126,10 @@ training or evaluation path. Each styled prompt is `{caption}, in <sks> style`;
 base-generated market rows may occasionally use the exact assignment prompt.
 
 Before model loading, the trainer creates the complete 2,000-draw schedule for
-500 optimizer steps. Independent deterministic seeds control source selection,
-crop, flip, prompt mode, VAE latent sampling, diffusion noise, and timestep.
-Every realized draw is appended to `training_trace.jsonl`. Optimizer losses and
-all three learning rates are appended to `training_metrics.jsonl`.
+the registered 500-step trajectory. Independent deterministic seeds control
+source selection, crop, flip, prompt mode, VAE latent sampling, diffusion noise,
+and timestep. The committed historical schedule, trace, and metrics are under
+`reproducibility/cosine_step250`.
 
 The selected model uses rank 16 for UNet `to_q`, `to_k`, `to_v`, `to_out.0`
 and rank 4 for text-encoder `q_proj`, `k_proj`, `v_proj`, `out_proj`. Training
@@ -153,22 +144,8 @@ tensor-for-tensor and are recorded under `reproducibility/self_market_step150`.
 The selected continuation, including its deterministic trace and reviews
 through step 500, is recorded under `reproducibility/cosine_step250`.
 
-The three fresh candidates and the refinement can also be replayed in their
-original reviewed sessions:
-
-```bat
-python code\run_clean_campaign.py --candidate supplied_only --stop_after_step 100 --overwrite
-python code\run_clean_campaign.py --candidate supplied_only --stop_after_step 200 --resume
-python code\run_clean_campaign.py --candidate self_market --stop_after_step 100 --overwrite
-python code\run_clean_campaign.py --candidate self_market --stop_after_step 200 --resume
-python code\run_clean_campaign.py --candidate balanced_people --stop_after_step 100 --overwrite
-python code\run_clean_campaign.py --candidate balanced_people --stop_after_step 200 --resume
-python code\run_clean_campaign.py --candidate market_people_refinement --stop_after_step 60 --overwrite
-```
-
-The runner validates the portable manifests before training and renders every
-new checkpoint review grid. The committed records are under
-`experiments/clean_campaign`; comparison adapters are under `models`.
+The original candidate records are under `experiments/clean_campaign`, and the
+comparison adapters are under `models`.
 
 ## Model Selection
 
@@ -221,11 +198,9 @@ They show the improvement through step 250 and the later plateau that made step
 python -m py_compile code\train_lora.py code\eval_lora.py code\token_utils.py
 python code\verify_training_data.py --data_dir style_imgs\512 --captions_jsonl code\auto_captions\florence_captions.jsonl --auxiliary_jsonl training_data\auxiliary.jsonl
 python code\verify_lora_weights.py --weights lora_out\pytorch_lora_weights.safetensors
-python code\verify_reproduced_model.py --selected lora_out\pytorch_lora_weights.safetensors --reproduced reproducibility\cosine_step250\reproduced_model\pytorch_lora_weights.safetensors --training_dir reproducibility\cosine_step250\reproduced_training --reference_training_dir reproducibility\cosine_step250\training --data_registry training_data\registry.json --selected_step 250 --out reproducibility\cosine_step250\reproduction_verification.json
 python code\make_report.py --team "Ivan Iachnyk, Claudius Kühn, Robin Sternberg, Arham Shahzad, Clemens Rosskopf"
 python code\package_submission.py --out assignment4_submission.zip
 ```
 
-The packager checks required files, the exact prompt, sample and adapter hashes,
-the two-page report limit, ZIP CRCs, one final adapter under `lora_out`, and the
-absence of the three forbidden PDF-image hashes.
+The packager writes only the files required by the assignment and checks the ZIP
+CRC.
