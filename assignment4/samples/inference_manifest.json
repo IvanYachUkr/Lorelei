@@ -10,35 +10,42 @@
     "text_encoder_lora_rank": "4",
     "training_step": "250"
   },
+<<<<<<< Updated upstream
   "adapter_path": "C:\\Users\\vanya\\Documents\\DeepLearningFinalGroup\\assignment4\\lora_out\\pytorch_lora_weights.safetensors",
   "adapter_sha256": "fbcfb525c394f6c8f249196dae3c654a9dd08e9c232000e5bac95aba10805d8b",
+=======
+  "adapter_path": "/home/clemens/Dokumente/0_Master_AIR/2.SoSe_2026/Deep Learning/Assignment 4/Lorelei/assignment4/lora_out/pytorch_lora_weights.safetensors",
+  "adapter_sha256": "606190249fe5df2d4c36bb48552cb9837bfcc91e8388ef85abe25688ad71c788",
+>>>>>>> Stashed changes
   "base_model": "runwayml/stable-diffusion-v1-5",
   "base_model_commit": null,
   "base_model_revision": null,
   "base_model_variant": null,
   "command": [
-    "code\\eval_lora.py",
+    "code/eval_lora.py",
     "--weights",
-    "lora_out\\pytorch_lora_weights.safetensors",
+    "lora_out/pytorch_lora_weights.safetensors",
     "--prompt",
     "a busy market, in <sks> style",
     "--outdir",
     "samples",
     "--num_images",
-    "6",
+    "3",
     "--seed",
     "84000",
-    "--num_inference_steps",
-    "30",
-    "--guidance_scale",
-    "7.5"
+    "--device",
+    "cpu"
   ],
+<<<<<<< Updated upstream
   "created_utc": "2026-07-24T21:44:48.932621+00:00",
+=======
+  "created_utc": "2026-07-24T22:20:54.168416+00:00",
+>>>>>>> Stashed changes
   "deterministic_algorithms": true,
-  "device": "cuda",
-  "dtype": "torch.float16",
+  "device": "cpu",
+  "dtype": "torch.float32",
   "format_version": 1,
-  "gpu": "NVIDIA GeForce RTX 4070 Laptop GPU",
+  "gpu": null,
   "guidance_scale": 7.5,
   "height": 512,
   "images": [
@@ -47,20 +54,29 @@
       "kind": "adapter",
       "path": "adapter_00.png",
       "seed": 84000,
+<<<<<<< Updated upstream
       "sha256": "7f37e613443708d906b77e8e7a132d7ba26baf870339bf285c3b270a68c19c65"
+=======
+      "sha256": "fda55ccd57a9cc650189921022b97422f18c780a875b2cc128ef70752bf42ea1"
+>>>>>>> Stashed changes
     },
     {
       "index": 1,
       "kind": "adapter",
       "path": "adapter_01.png",
       "seed": 84001,
+<<<<<<< Updated upstream
       "sha256": "a3c58ea6988f258f32c7e92c870383a421f4888a18c4a5dfb730e966505ac29b"
+=======
+      "sha256": "33909d11835f9abe34e7dcb50f9088c4f59e8db11aad6afa22c8cf631f76e2df"
+>>>>>>> Stashed changes
     },
     {
       "index": 2,
       "kind": "adapter",
       "path": "adapter_02.png",
       "seed": 84002,
+<<<<<<< Updated upstream
       "sha256": "b1c4032524c894af40d876fde8413e5204eaac0dc14b7a228940d741ffafd9ab"
     },
     {
@@ -83,26 +99,30 @@
       "path": "adapter_05.png",
       "seed": 84005,
       "sha256": "e35ba905ac658245c70ee442dfa47227ff4347968c8882b8aa29f9bf229892f9"
+=======
+      "sha256": "97509284876ac70dda34ec60364a0a491af61544d47b5eaa1e01cf93e3db072f"
+>>>>>>> Stashed changes
     }
   ],
   "instance_token": "<sks>",
-  "num_images": 6,
+  "num_images": 3,
   "num_inference_steps": 30,
   "packages": {
     "diffusers": "0.38.0",
     "peft": "0.19.1",
     "safetensors": "0.8.0",
-    "torch": "2.11.0+cu128",
+    "torch": "2.13.0",
     "transformers": "4.57.6"
   },
-  "platform": "Windows-11-10.0.26200-SP0",
+  "platform": "Linux-6.17.0-35-generic-x86_64-with-glibc2.39",
   "prompt": "a busy market, in <sks> style",
-  "python": "3.12.10 (tags/v3.12.10:0cc8128, Apr  8 2025, 12:21:36) [MSC v.1943 64 bit (AMD64)]",
+  "python": "3.14.3 (main, Feb 11 2026, 08:49:59) [GCC 13.3.0]",
   "scheduler_class": "DPMSolverMultistepScheduler",
   "scheduler_config": {
     "_class_name": "DPMSolverMultistepScheduler",
     "_diffusers_version": "0.6.0",
     "_use_default_values": [
+<<<<<<< Updated upstream
       "solver_order",
       "use_flow_sigmas",
       "final_sigmas_type",
@@ -125,6 +145,30 @@
       "rescale_betas_zero_snr",
       "use_beta_sigmas",
       "use_lu_lambdas"
+=======
+      "algorithm_type",
+      "lambda_min_clipped",
+      "solver_order",
+      "time_shift_type",
+      "use_dynamic_shifting",
+      "euler_at_final",
+      "flow_shift",
+      "use_karras_sigmas",
+      "thresholding",
+      "use_lu_lambdas",
+      "final_sigmas_type",
+      "use_beta_sigmas",
+      "lower_order_final",
+      "timestep_spacing",
+      "use_exponential_sigmas",
+      "sample_max_value",
+      "variance_type",
+      "prediction_type",
+      "dynamic_thresholding_ratio",
+      "solver_type",
+      "use_flow_sigmas",
+      "rescale_betas_zero_snr"
+>>>>>>> Stashed changes
     ],
     "algorithm_type": "dpmsolver++",
     "beta_end": 0.012,

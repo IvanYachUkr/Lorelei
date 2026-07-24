@@ -139,6 +139,7 @@ def add_or_restore_custom_token(pipe, weights: Path, metadata: dict[str, str], i
         embedding_weight[token_id].copy_(token_embedding.to(device=embedding_weight.device, dtype=embedding_weight.dtype))
 
 
+
 def make_lora_only_file(weights: Path, metadata: dict[str, str], tmpdir: Path) -> Path:
     tensors = load_file(str(weights), device="cpu")
     tensors = {key: value for key, value in tensors.items() if key != CUSTOM_TOKEN_EMBEDDING_KEY}
@@ -225,7 +226,13 @@ def main() -> None:
         torch.backends.cuda.enable_math_sdp(True)
 
     pipe = load_pipeline(args, device=device, dtype=dtype)
+    base_vocab_size = len(pipe.tokenizer)
+    print(f"Base model '{args.model_name}' loaded, num of tokens: {base_vocab_size}")
+
     add_or_restore_custom_token(pipe, args.weights, metadata, args.instance_token)
+    new_vocab_size = len(pipe.tokenizer)
+    instance_token = args.instance_token or metadata.get("instance_token") or "<sks>"
+
     image_records: list[dict[str, object]] = []
 
     if args.baseline:
@@ -246,6 +253,9 @@ def main() -> None:
     with tempfile.TemporaryDirectory(prefix="lora_eval_") as tmp:
         lora_path = make_lora_only_file(args.weights, metadata, Path(tmp))
         pipe.load_lora_weights(str(lora_path.parent), weight_name=lora_path.name)
+
+    print(f"LoRA model '{args.weights}' loaded, num of tokens: {new_vocab_size} (base model tokens + {instance_token} token)")
+
 
     image_records.extend(render_images(
         pipe=pipe,
