@@ -1,6 +1,4 @@
 #!/usr/bin/env python
-"""Render samples from the trained Stable Diffusion 1.5 LoRA adapter."""
-
 import argparse
 import json
 import os
@@ -24,6 +22,8 @@ except ImportError as exc:  # pragma: no cover
 
 CUSTOM_TOKEN_EMBEDDING_KEY = "__custom_token_embedding__"
 LORA_FILENAME = "pytorch_lora_weights.safetensors"
+MODEL_NAME = "runwayml/stable-diffusion-v1-5"
+IMAGE_SIZE = 512
 
 
 def parse_args():
@@ -31,26 +31,18 @@ def parse_args():
     parser.add_argument("--weights", type=Path, required=True, help="Path to pytorch_lora_weights.safetensors.")
     parser.add_argument("--prompt", default="a busy market, in <sks> style", help="Prompt to render.")
     parser.add_argument("--outdir", type=Path, default=Path("samples"), help="Directory for generated PNGs.")
-    parser.add_argument("--model_name", default="runwayml/stable-diffusion-v1-5", help="Base SD 1.5 model id or path.")
-    parser.add_argument("--revision", default=None, help="Optional Hugging Face model revision.")
-    parser.add_argument("--variant", default=None, help="Optional model variant, such as fp16.")
-    parser.add_argument("--instance_token", default=None, help="Override token if metadata is missing.")
     parser.add_argument("--num_images", type=int, default=3, help="Number of adapter samples to render.")
     parser.add_argument("--seed", type=int, default=1234)
     parser.add_argument("--num_inference_steps", type=int, default=150)
     parser.add_argument("--guidance_scale", type=float, default=7.5)
-    parser.add_argument("--height", type=int, default=512)
-    parser.add_argument("--width", type=int, default=512)
-    parser.add_argument("--device", default=None, help="Defaults to cuda when available, otherwise cpu.")
-    parser.add_argument("--dtype", choices=["auto", "float32", "float16", "bfloat16"], default="auto")
     parser.add_argument("--baseline", action="store_true", help="Also render baseline images before loading the adapter.")
     return parser.parse_args()
 
 
-def add_or_restore_custom_token(pipe, weights, metadata, instance_token_arg):
+def add_or_restore_custom_token(pipe, weights, metadata):
     tensors = load_file(str(weights), device="cpu")
     token_embedding = tensors.get(CUSTOM_TOKEN_EMBEDDING_KEY)
-    instance_token = instance_token_arg or metadata.get("instance_token")
+    instance_token = metadata.get("instance_token")
     if not instance_token:
         if token_embedding is not None:
             raise ValueError("Weights contain a custom token embedding but no instance token metadata.")
@@ -88,17 +80,13 @@ def make_lora_only_file(weights, metadata, tmpdir):
     return filtered_path
 
 
-def load_pipeline(args, device, dtype):
-    load_kwargs = {
-        "torch_dtype": dtype,
-        "safety_checker": None,
-        "requires_safety_checker": False,
-        "revision": args.revision,
-    }
-    if args.variant is not None:
-        load_kwargs["variant"] = args.variant
-
-    pipe = StableDiffusionPipeline.from_pretrained(args.model_name, **load_kwargs)
+def load_pipeline(device, dtype):
+    pipe = StableDiffusionPipeline.from_pretrained(
+        MODEL_NAME,
+        torch_dtype=dtype,
+        safety_checker=None,
+        requires_safety_checker=False,
+    )
     pipe.scheduler = DPMSolverMultistepScheduler.from_config(pipe.scheduler.config)
     pipe.to(device)
     pipe.set_progress_bar_config(disable=False)
@@ -114,8 +102,6 @@ def render_images(
     seed,
     num_inference_steps,
     guidance_scale,
-    height,
-    width,
     device,
 ):
     outdir.mkdir(parents=True, exist_ok=True)
@@ -127,8 +113,8 @@ def render_images(
             prompt=prompt,
             num_inference_steps=num_inference_steps,
             guidance_scale=guidance_scale,
-            height=height,
-            width=width,
+            height=IMAGE_SIZE,
+            width=IMAGE_SIZE,
             generator=generator,
         ).images[0]
         image_path = outdir / f"{prefix}_{index:02d}.png"
@@ -153,13 +139,8 @@ def main():
     if args.num_images < 3:
         raise ValueError("--num_images must be at least 3 to satisfy the assignment")
 
-    device = torch.device(args.device or ("cuda" if torch.cuda.is_available() else "cpu"))
-    if args.dtype == "float32" or device.type != "cuda":
-        dtype = torch.float32
-    elif args.dtype == "bfloat16":
-        dtype = torch.bfloat16
-    else:
-        dtype = torch.float16
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    dtype = torch.float16 if device.type == "cuda" else torch.float32
     with safe_open(str(args.weights), framework="pt", device="cpu") as handle:
         metadata = dict(handle.metadata() or {})
     torch.use_deterministic_algorithms(True, warn_only=False)
@@ -170,13 +151,13 @@ def main():
         torch.backends.cuda.enable_mem_efficient_sdp(False)
         torch.backends.cuda.enable_math_sdp(True)
 
-    pipe = load_pipeline(args, device=device, dtype=dtype)
+    pipe = load_pipeline(device=device, dtype=dtype)
     base_vocab_size = len(pipe.tokenizer)
-    print(f"Base model '{args.model_name}' loaded, num of tokens: {base_vocab_size}")
+    print(f"Base model '{MODEL_NAME}' loaded, num of tokens: {base_vocab_size}")
 
-    add_or_restore_custom_token(pipe, args.weights, metadata, args.instance_token)
+    add_or_restore_custom_token(pipe, args.weights, metadata)
     new_vocab_size = len(pipe.tokenizer)
-    instance_token = args.instance_token or metadata.get("instance_token") or "<sks>"
+    instance_token = metadata.get("instance_token") or "<sks>"
 
     image_records = []
 
@@ -190,8 +171,6 @@ def main():
             seed=args.seed,
             num_inference_steps=args.num_inference_steps,
             guidance_scale=args.guidance_scale,
-            height=args.height,
-            width=args.width,
             device=device,
         ))
 
@@ -211,8 +190,6 @@ def main():
         seed=args.seed,
         num_inference_steps=args.num_inference_steps,
         guidance_scale=args.guidance_scale,
-        height=args.height,
-        width=args.width,
         device=device,
     ))
 
@@ -220,19 +197,17 @@ def main():
         "format_version": 1,
         "created_utc": datetime.now(timezone.utc).isoformat(),
         "command": sys.argv,
-        "base_model": args.model_name,
-        "base_model_revision": args.revision,
-        "base_model_variant": args.variant,
+        "base_model": MODEL_NAME,
         "adapter_path": str(args.weights.resolve()),
         "adapter_metadata": metadata,
         "prompt": args.prompt,
-        "instance_token": args.instance_token or metadata.get("instance_token"),
+        "instance_token": metadata.get("instance_token"),
         "num_images": args.num_images,
         "seed": args.seed,
         "num_inference_steps": args.num_inference_steps,
         "guidance_scale": args.guidance_scale,
-        "height": args.height,
-        "width": args.width,
+        "height": IMAGE_SIZE,
+        "width": IMAGE_SIZE,
         "scheduler_class": type(pipe.scheduler).__name__,
         "scheduler_config": dict(pipe.scheduler.config),
         "device": str(device),
