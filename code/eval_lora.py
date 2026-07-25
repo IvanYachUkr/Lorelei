@@ -1,8 +1,6 @@
 #!/usr/bin/env python
 """Render samples from the trained Stable Diffusion 1.5 LoRA adapter."""
 
-from __future__ import annotations
-
 import argparse
 import json
 import os
@@ -28,7 +26,7 @@ CUSTOM_TOKEN_EMBEDDING_KEY = "__custom_token_embedding__"
 LORA_FILENAME = "pytorch_lora_weights.safetensors"
 
 
-def parse_args() -> argparse.Namespace:
+def parse_args():
     parser = argparse.ArgumentParser(description="Generate images with the trained style LoRA adapter.")
     parser.add_argument("--weights", type=Path, required=True, help="Path to pytorch_lora_weights.safetensors.")
     parser.add_argument("--prompt", default="a busy market, in <sks> style", help="Prompt to render.")
@@ -49,7 +47,7 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def add_or_restore_custom_token(pipe, weights: Path, metadata: dict[str, str], instance_token_arg: str | None) -> None:
+def add_or_restore_custom_token(pipe, weights, metadata, instance_token_arg):
     tensors = load_file(str(weights), device="cpu")
     token_embedding = tensors.get(CUSTOM_TOKEN_EMBEDDING_KEY)
     instance_token = instance_token_arg or metadata.get("instance_token")
@@ -82,7 +80,7 @@ def add_or_restore_custom_token(pipe, weights: Path, metadata: dict[str, str], i
 
 
 
-def make_lora_only_file(weights: Path, metadata: dict[str, str], tmpdir: Path) -> Path:
+def make_lora_only_file(weights, metadata, tmpdir):
     tensors = load_file(str(weights), device="cpu")
     tensors = {key: value for key, value in tensors.items() if key != CUSTOM_TOKEN_EMBEDDING_KEY}
     filtered_path = tmpdir / LORA_FILENAME
@@ -90,7 +88,7 @@ def make_lora_only_file(weights: Path, metadata: dict[str, str], tmpdir: Path) -
     return filtered_path
 
 
-def load_pipeline(args: argparse.Namespace, device: torch.device, dtype: torch.dtype) -> StableDiffusionPipeline:
+def load_pipeline(args, device, dtype):
     load_kwargs = {
         "torch_dtype": dtype,
         "safety_checker": None,
@@ -108,20 +106,20 @@ def load_pipeline(args: argparse.Namespace, device: torch.device, dtype: torch.d
 
 
 def render_images(
-    pipe: StableDiffusionPipeline,
-    prompt: str,
-    outdir: Path,
-    prefix: str,
-    num_images: int,
-    seed: int,
-    num_inference_steps: int,
-    guidance_scale: float,
-    height: int,
-    width: int,
-    device: torch.device,
-) -> list[dict[str, object]]:
+    pipe,
+    prompt,
+    outdir,
+    prefix,
+    num_images,
+    seed,
+    num_inference_steps,
+    guidance_scale,
+    height,
+    width,
+    device,
+):
     outdir.mkdir(parents=True, exist_ok=True)
-    records: list[dict[str, object]] = []
+    records = []
     for index in range(num_images):
         image_seed = seed + index
         generator = torch.Generator(device=device.type).manual_seed(image_seed)
@@ -146,7 +144,7 @@ def render_images(
     return records
 
 
-def main() -> None:
+def main():
     os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
     os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")
     args = parse_args()
@@ -180,7 +178,7 @@ def main() -> None:
     new_vocab_size = len(pipe.tokenizer)
     instance_token = args.instance_token or metadata.get("instance_token") or "<sks>"
 
-    image_records: list[dict[str, object]] = []
+    image_records = []
 
     if args.baseline:
         image_records.extend(render_images(

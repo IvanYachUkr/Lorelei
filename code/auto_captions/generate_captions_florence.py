@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import argparse
 import json
 import os
@@ -48,7 +46,7 @@ def clean_caption(text):
     return text 
 
 
-def main() -> None:
+def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--out_path", type=Path, default=OUT_PATH)
     parser.add_argument("--model_name", default=MODEL_NAME)
