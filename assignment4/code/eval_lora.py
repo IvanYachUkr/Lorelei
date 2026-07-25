@@ -76,7 +76,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--instance_token", default=None, help="Override token if metadata is missing.")
     parser.add_argument("--num_images", type=int, default=3, help="Number of adapter samples to render.")
     parser.add_argument("--seed", type=int, default=1234)
-    parser.add_argument("--num_inference_steps", type=int, default=30)
+    parser.add_argument("--num_inference_steps", type=int, default=150)
     parser.add_argument("--guidance_scale", type=float, default=7.5)
     parser.add_argument("--height", type=int, default=512)
     parser.add_argument("--width", type=int, default=512)
