@@ -129,8 +129,10 @@ def main() -> None:
             "Supplied images only: style transfer was already strong, while market layouts remained relatively simple and flat.",
             "Base-model market examples: stalls became more structured, groups of people separated more clearly, and the target prompt produced populated scenes more reliably. This became the main training recipe.",
             "Face and person crop emphasis: an 8% crop share improved close portraits and larger faces. Its effect was concentrated at portrait scale, so the final mix kept a lighter emphasis on people instead of making crops dominant.",
+            "Face-focused refinement: a short continuation at lower learning rates preserved the established market structure and mainly affected foreground character detail. The source mixture had a larger visual impact than this later refinement.",
             "Longer cosine training: market composition and local detail continued to improve until approximately step 250. Later checkpoints changed only slightly, so step 250 was selected for the final adapter.",
             "Stronger preservation and lower learning rates: this kept scene layouts stable, while the original cosine run gave the most consistent balance between the learned style and market detail.",
+            "Fixed-seed model selection: across 20 final market, portrait, and two-person comparisons, the selected step-250 model was preferred 11 times, compared with 6 for the stronger-preservation continuation and 3 for step 150.",
         ],
         margin,
         y - 28,
@@ -183,12 +185,18 @@ def main() -> None:
             text_y - 20,
             max_chars=96,
         )
-        draw_wrapped(
+        c.setFont("Helvetica-Bold", 13)
+        c.drawString(margin, text_y - 8, "Inference experiments")
+        c.setFont("Helvetica", 10)
+        draw_bullets(
             c,
-            "For the final samples, increasing inference from 40 to 150 steps added shadow depth and clearer separation between foreground figures and background stalls. Changes beyond 150 steps were minimal, so 150 steps was used for the submitted images.",
+            [
+                "Denoising steps: we compared 30, 40, 50, 75, 100, 150, 200, and 300 steps on the same seeds. Shadow depth and foreground/background separation improved through 150 steps; later changes were minimal.",
+                "Guidance scale: CFG 6.5 produced softer and more variable compositions, while CFG 8.5 strengthened outlines and sometimes repeated fine patterns. CFG 7.5 gave the best balance of structure, color, and line quality.",
+            ],
             margin,
-            text_y - 6,
-            max_chars=96,
+            text_y - 28,
+            max_chars=91,
         )
     else:
         c.drawString(margin, page_h - margin - 52, "No generated samples found. Run code/eval_lora.py first.")
