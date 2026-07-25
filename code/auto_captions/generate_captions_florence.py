@@ -7,19 +7,14 @@ from pathlib import Path
 import torch
 from PIL import Image
 from tqdm.auto import tqdm
-from transformers import AutoModelForCausalLM, AutoProcessor
-
-# dumb dependency issue with flash_attn module -> make it not use it
-import transformers.dynamic_module_utils as _dyn
-_orig_get_imports = _dyn.get_imports
-_dyn.get_imports = lambda path: [m for m in _orig_get_imports(path) if m != "flash_attn"]
+from transformers import AutoProcessor, Florence2ForConditionalGeneration
 
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 ASSIGNMENT_DIR = SCRIPT_DIR.parents[1]
 DATA_DIR = ASSIGNMENT_DIR / "style_imgs" / "512"
 OUT_PATH = SCRIPT_DIR / "florence_captions.jsonl"
-MODEL_NAME = "microsoft/Florence-2-base"
+MODEL_NAME = "florence-community/Florence-2-base"
 
 
 def clean_caption(text):
@@ -64,12 +59,11 @@ def main():
     device = "cuda" if torch.cuda.is_available() else "cpu"
     dtype = torch.float16 if device == "cuda" else torch.float32
 
-    model = AutoModelForCausalLM.from_pretrained(
+    model = Florence2ForConditionalGeneration.from_pretrained(
         args.model_name,
-        torch_dtype=dtype,
-        trust_remote_code=True,
+        dtype=dtype,
     ).to(device)
-    processor = AutoProcessor.from_pretrained(args.model_name, trust_remote_code=True)
+    processor = AutoProcessor.from_pretrained(args.model_name)
 
     task = "<CAPTION>"
 
