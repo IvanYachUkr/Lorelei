@@ -6,12 +6,11 @@ import json
 import os
 import random
 import shutil
-import unicodedata
 from pathlib import Path
 
 import torch
 import torch.nn.functional as F
-from PIL import Image, ImageOps
+from PIL import Image
 from diffusers import AutoencoderKL, DDPMScheduler, StableDiffusionPipeline, UNet2DConditionModel
 from diffusers.optimization import get_scheduler
 from diffusers.utils import convert_state_dict_to_diffusers
@@ -27,7 +26,6 @@ from transformers import AutoTokenizer, CLIPTextModel
 
 WEIGHTS_NAME = "pytorch_lora_weights.safetensors"
 TOKEN_KEY = "__custom_token_embedding__"
-IMAGE_EXTENSIONS = {".bmp", ".jpeg", ".jpg", ".png", ".webp"}
 
 
 def parse_args():
@@ -76,23 +74,14 @@ def read_jsonl(path):
 
 
 def resolve_image(manifest, value):
-    path = Path(value)
-    relative_to_manifest = (manifest.parent / path).resolve()
-    if relative_to_manifest.exists():
-        return relative_to_manifest
-    return path.resolve()
-
-
-def portable_path_key(path):
-    normalized = unicodedata.normalize("NFKD", path.as_posix())
-    return "".join(char for char in normalized if not unicodedata.combining(char)).casefold()
+    return (manifest.parent / Path(value)).resolve()
 
 
 def load_examples(args):
     images = sorted(
         path.resolve()
         for path in args.data_dir.iterdir()
-        if path.is_file() and path.suffix.lower() in IMAGE_EXTENSIONS
+        if path.is_file() and path.suffix.lower() in {".jpg", ".png"}
     )
     if not images:
         raise ValueError(f"No images found in {args.data_dir}")
@@ -101,17 +90,16 @@ def load_examples(args):
     if args.captions_jsonl:
         for row in read_jsonl(args.captions_jsonl):
             image = resolve_image(args.captions_jsonl, row["image"])
-            key = portable_path_key(image)
-            if key in captions:
+            if image in captions:
                 raise ValueError(f"Duplicate caption path: {row['image']}")
-            captions[key] = row["caption"].strip().rstrip(".,")
-        if set(captions) != {portable_path_key(image) for image in images}:
+            captions[image] = row["caption"].strip().rstrip(".,")
+        if set(captions) != set(images):
             raise ValueError("The captions file must cover every supplied image exactly once")
 
     examples = [
         {
             "image": image,
-            "caption": captions.get(portable_path_key(image), "an animated movie scene"),
+            "caption": captions.get(image, "an animated movie scene"),
             "weight": 1.0,
             "target_prompt_prob": 0.0,
         }
@@ -152,7 +140,7 @@ class ImageDataset(Dataset):
         rng = random.Random(augmentation_seed)
 
         with Image.open(example["image"]) as source:
-            image = ImageOps.exif_transpose(source).convert("RGB")
+            image = source.convert("RGB")
         image = TF.resize(image, self.resolution, interpolation=transforms.InterpolationMode.BILINEAR)
         max_top = max(0, image.height - self.resolution)
         max_left = max(0, image.width - self.resolution)
