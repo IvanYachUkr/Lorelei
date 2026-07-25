@@ -29,11 +29,11 @@
     "--seed",
     "84000",
     "--num_inference_steps",
-    "40",
+    "150",
     "--guidance_scale",
     "7.5"
   ],
-  "created_utc": "2026-07-25T00:22:56.782283+00:00",
+  "created_utc": "2026-07-25T01:23:10.194501+00:00",
   "deterministic_algorithms": true,
   "device": "cuda",
   "dtype": "torch.float16",
@@ -47,47 +47,47 @@
       "kind": "adapter",
       "path": "adapter_00.png",
       "seed": 84000,
-      "sha256": "5a618e7425d104a50de9737fbca1a781fd1c82264683e9b5755a4d7373decbf4"
+      "sha256": "e8aff2f709f3539b5a4c1e5a969987646d248be1f5a2ba6b2867318161c34c13"
     },
     {
       "index": 1,
       "kind": "adapter",
       "path": "adapter_01.png",
       "seed": 84001,
-      "sha256": "eb04ef19046aa48f28d4cd61edadebf10b99f6dea8c46a3c61aeb339cb605350"
+      "sha256": "17de08217814dea85180f5c1311e4404b168f8e1424f16910a4d715ca7268964"
     },
     {
       "index": 2,
       "kind": "adapter",
       "path": "adapter_02.png",
       "seed": 84002,
-      "sha256": "ce1324ae09b2cdb54b6e647b04d1b9c02b57c1283152be8ebea33a57b0518447"
+      "sha256": "01d70b56026e88d811eda78cd397b4a41d862de340a41d8ec7b0b6dc10016105"
     },
     {
       "index": 3,
       "kind": "adapter",
       "path": "adapter_03.png",
       "seed": 84003,
-      "sha256": "512c8c2a9c15f75ece955e0bd0f88b8c3389dfa8a2ab2ca2ce675959c162c1cd"
+      "sha256": "e9d7b334fa0ce6f9bf386a6da995368f6fc58cd3a6b5ddb640f389f24be68490"
     },
     {
       "index": 4,
       "kind": "adapter",
       "path": "adapter_04.png",
       "seed": 84004,
-      "sha256": "bd1457ff8afd5d49009f9b0d85fc1c572483b0292a140b180c3bf71c962aa404"
+      "sha256": "ca2f4d950c758ae6779aabd0dffba6eee832882610d9eb813f4454ea7b9fbf52"
     },
     {
       "index": 5,
       "kind": "adapter",
       "path": "adapter_05.png",
       "seed": 84005,
-      "sha256": "f77318363a105e7268e618ca56736c36e0f3e906e411e6940540c0913a0ee37a"
+      "sha256": "61783fdd9d9c74870b1640893dd3a1913ca44be927db794ae083acdc55109262"
     }
   ],
   "instance_token": "<sks>",
   "num_images": 6,
-  "num_inference_steps": 40,
+  "num_inference_steps": 150,
   "packages": {
     "diffusers": "0.38.0",
     "peft": "0.19.1",
@@ -103,28 +103,28 @@
     "_class_name": "DPMSolverMultistepScheduler",
     "_diffusers_version": "0.6.0",
     "_use_default_values": [
+      "use_flow_sigmas",
+      "use_exponential_sigmas",
+      "timestep_spacing",
+      "rescale_betas_zero_snr",
       "thresholding",
       "euler_at_final",
-      "solver_order",
-      "flow_shift",
-      "time_shift_type",
-      "lambda_min_clipped",
-      "dynamic_thresholding_ratio",
-      "use_exponential_sigmas",
-      "prediction_type",
-      "use_karras_sigmas",
-      "use_flow_sigmas",
-      "solver_type",
       "sample_max_value",
-      "final_sigmas_type",
-      "algorithm_type",
-      "use_beta_sigmas",
-      "rescale_betas_zero_snr",
-      "use_dynamic_shifting",
+      "solver_type",
+      "time_shift_type",
+      "dynamic_thresholding_ratio",
+      "prediction_type",
       "use_lu_lambdas",
+      "solver_order",
+      "variance_type",
+      "use_karras_sigmas",
       "lower_order_final",
-      "timestep_spacing",
-      "variance_type"
+      "lambda_min_clipped",
+      "algorithm_type",
+      "flow_shift",
+      "use_dynamic_shifting",
+      "final_sigmas_type",
+      "use_beta_sigmas"
     ],
     "algorithm_type": "dpmsolver++",
     "beta_end": 0.012,

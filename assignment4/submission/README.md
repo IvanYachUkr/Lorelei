@@ -70,7 +70,7 @@ python code/eval_lora.py \
   --outdir samples \
   --num_images 3 \
   --seed 84000 \
-  --num_inference_steps 40 \
+  --num_inference_steps 150 \
   --guidance_scale 7.5
 ```
 
