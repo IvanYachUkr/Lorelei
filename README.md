@@ -12,9 +12,9 @@ Stable Diffusion 1.5 UNet and text encoder. The final checkpoint is
 Python 3.10 or newer and a CUDA GPU are recommended.
 
 ```bash
-python -m venv .venv
+python3 -m venv .venv
 source .venv/bin/activate
-python -m pip install -r requirements.txt
+python3 -m pip install -r requirements.txt
 ```
 
 The measured training environment used Python 3.12, PyTorch 2.11, CUDA 12.8,
