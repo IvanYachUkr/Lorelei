@@ -4,8 +4,6 @@
 from __future__ import annotations
 
 import argparse
-import hashlib
-import importlib.metadata
 import json
 import os
 import platform
@@ -30,41 +28,6 @@ CUSTOM_TOKEN_EMBEDDING_KEY = "__custom_token_embedding__"
 LORA_FILENAME = "pytorch_lora_weights.safetensors"
 
 
-def file_sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
-
-
-def package_versions() -> dict[str, str]:
-    versions: dict[str, str] = {}
-    for package in ("torch", "diffusers", "peft", "transformers", "safetensors"):
-        try:
-            versions[package] = importlib.metadata.version(package)
-        except importlib.metadata.PackageNotFoundError:
-            versions[package] = "not-installed"
-    return versions
-
-
-def json_safe(value):
-    if value is None or isinstance(value, (str, int, float, bool)):
-        return value
-    if isinstance(value, dict):
-        return {str(key): json_safe(item) for key, item in value.items()}
-    if isinstance(value, (list, tuple)):
-        return [json_safe(item) for item in value]
-    return str(value)
-
-
-def atomic_write_json(path: Path, document: dict[str, object]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary_path = path.with_suffix(path.suffix + ".tmp")
-    temporary_path.write_text(json.dumps(document, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    os.replace(temporary_path, path)
-
-
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Generate images with the trained style LoRA adapter.")
     parser.add_argument("--weights", type=Path, required=True, help="Path to pytorch_lora_weights.safetensors.")
@@ -84,27 +47,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--dtype", choices=["auto", "float32", "float16", "bfloat16"], default="auto")
     parser.add_argument("--baseline", action="store_true", help="Also render baseline images before loading the adapter.")
     return parser.parse_args()
-
-
-def choose_device(device_arg: str | None) -> torch.device:
-    if device_arg:
-        return torch.device(device_arg)
-    return torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-
-def choose_dtype(dtype_arg: str, device: torch.device) -> torch.dtype:
-    if dtype_arg == "float32" or device.type != "cuda":
-        return torch.float32
-    if dtype_arg == "float16":
-        return torch.float16
-    if dtype_arg == "bfloat16":
-        return torch.bfloat16
-    return torch.float16
-
-
-def read_metadata(weights: Path) -> dict[str, str]:
-    with safe_open(str(weights), framework="pt", device="cpu") as handle:
-        return dict(handle.metadata() or {})
 
 
 def add_or_restore_custom_token(pipe, weights: Path, metadata: dict[str, str], instance_token_arg: str | None) -> None:
@@ -199,7 +141,6 @@ def render_images(
                 "index": index,
                 "seed": image_seed,
                 "path": image_path.name,
-                "sha256": file_sha256(image_path),
             }
         )
     return records
@@ -214,9 +155,15 @@ def main() -> None:
     if args.num_images < 3:
         raise ValueError("--num_images must be at least 3 to satisfy the assignment")
 
-    device = choose_device(args.device)
-    dtype = choose_dtype(args.dtype, device)
-    metadata = read_metadata(args.weights)
+    device = torch.device(args.device or ("cuda" if torch.cuda.is_available() else "cpu"))
+    if args.dtype == "float32" or device.type != "cuda":
+        dtype = torch.float32
+    elif args.dtype == "bfloat16":
+        dtype = torch.bfloat16
+    else:
+        dtype = torch.float16
+    with safe_open(str(args.weights), framework="pt", device="cpu") as handle:
+        metadata = dict(handle.metadata() or {})
     torch.use_deterministic_algorithms(True, warn_only=False)
     if device.type == "cuda":
         torch.backends.cudnn.benchmark = False
@@ -278,9 +225,7 @@ def main() -> None:
         "base_model": args.model_name,
         "base_model_revision": args.revision,
         "base_model_variant": args.variant,
-        "base_model_commit": json_safe(getattr(pipe.config, "_commit_hash", None)),
         "adapter_path": str(args.weights.resolve()),
-        "adapter_sha256": file_sha256(args.weights),
         "adapter_metadata": metadata,
         "prompt": args.prompt,
         "instance_token": args.instance_token or metadata.get("instance_token"),
@@ -291,18 +236,17 @@ def main() -> None:
         "height": args.height,
         "width": args.width,
         "scheduler_class": type(pipe.scheduler).__name__,
-        "scheduler_config": json_safe(dict(pipe.scheduler.config)),
+        "scheduler_config": dict(pipe.scheduler.config),
         "device": str(device),
         "gpu": torch.cuda.get_device_name(device) if device.type == "cuda" else None,
         "dtype": str(dtype),
         "platform": platform.platform(),
         "python": sys.version,
-        "packages": package_versions(),
         "deterministic_algorithms": True,
         "images": image_records,
     }
     manifest_path = args.outdir / "inference_manifest.json"
-    atomic_write_json(manifest_path, manifest)
+    manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
     print(f"Saved {args.num_images} adapter samples and {manifest_path}")
 
