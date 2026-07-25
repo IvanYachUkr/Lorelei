@@ -28,7 +28,7 @@ The archive contains every training image, caption, and auxiliary manifest used
 for the selected model. Run from the archive root:
 
 ```bash
-python code/train_lora.py \
+python3 code/train_lora.py \
   --data_dir style_imgs/512 \
   --captions_jsonl code/auto_captions/florence_captions.jsonl \
   --auxiliary_jsonl training_data/auxiliary.jsonl \
@@ -62,7 +62,7 @@ text-encoder LoRA, and learned token embedding.
 ## Evaluation
 
 ```bash
-python code/eval_lora.py \
+python3 code/eval_lora.py \
   --weights lora_out/pytorch_lora_weights.safetensors \
   --prompt "a busy market, in <sks> style" \
   --outdir samples \
