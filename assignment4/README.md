@@ -125,6 +125,10 @@ training or evaluation path. Each styled prompt is `{caption}, in <sks> style`;
 8% caption dropout uses `an animated movie scene, in <sks> style`. Only the
 base-generated market rows may occasionally use the exact assignment prompt.
 
+The submission ZIP uses ASCII-only image filenames and matching caption paths
+so the same archive extracts correctly on Windows and Linux. The trainer also
+matches canonically equivalent Unicode paths when loading external data.
+
 Before model loading, the trainer creates the complete 2,000-draw schedule for
 the registered 500-step trajectory. Independent deterministic seeds control
 source selection, crop, flip, prompt mode, VAE latent sampling, diffusion noise,

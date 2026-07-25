@@ -60,6 +60,8 @@ python code/train_lora.py \
 The trainer saves one file in `lora_out` containing the UNet LoRA,
 text-encoder LoRA, and learned token embedding. Different CUDA hardware may
 produce numerically different weights while reproducing the same procedure.
+All image filenames and caption paths in this archive are ASCII-only for
+consistent extraction on Windows and Linux.
 
 ## Evaluation
 

@@ -6,6 +6,7 @@ import json
 import os
 import random
 import shutil
+import unicodedata
 from pathlib import Path
 
 import torch
@@ -82,6 +83,11 @@ def resolve_image(manifest, value):
     return path.resolve()
 
 
+def portable_path_key(path):
+    normalized = unicodedata.normalize("NFKD", path.as_posix())
+    return "".join(char for char in normalized if not unicodedata.combining(char)).casefold()
+
+
 def load_examples(args):
     images = sorted(
         path.resolve()
@@ -95,14 +101,17 @@ def load_examples(args):
     if args.captions_jsonl:
         for row in read_jsonl(args.captions_jsonl):
             image = resolve_image(args.captions_jsonl, row["image"])
-            captions[image] = row["caption"].strip().rstrip(".,")
-        if set(captions) != set(images):
+            key = portable_path_key(image)
+            if key in captions:
+                raise ValueError(f"Duplicate caption path: {row['image']}")
+            captions[key] = row["caption"].strip().rstrip(".,")
+        if set(captions) != {portable_path_key(image) for image in images}:
             raise ValueError("The captions file must cover every supplied image exactly once")
 
     examples = [
         {
             "image": image,
-            "caption": captions.get(image, "an animated movie scene"),
+            "caption": captions.get(portable_path_key(image), "an animated movie scene"),
             "weight": 1.0,
             "target_prompt_prob": 0.0,
         }

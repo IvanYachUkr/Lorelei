@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import unicodedata
 from collections import Counter
 from pathlib import Path
 
@@ -33,6 +34,11 @@ def resolve_caption_image_path(captions_path: Path, image_value: str) -> Path:
     if image_path.is_absolute():
         return image_path.resolve()
     return (captions_path.parent / image_path).resolve()
+
+
+def portable_path_key(path: Path) -> str:
+    normalized = unicodedata.normalize("NFKD", path.as_posix())
+    return "".join(char for char in normalized if not unicodedata.combining(char)).casefold()
 
 
 def sha256(path: Path) -> str:
@@ -133,16 +139,12 @@ def main() -> None:
     if len(rows) != len(image_paths):
         raise ValueError(f"Expected {len(image_paths)} caption rows, found {len(rows)}")
 
-    image_set = set(image_paths)
-    caption_set = set(caption_paths)
+    image_set = {portable_path_key(path) for path in image_paths}
+    caption_set = {portable_path_key(path) for path in caption_paths}
     if image_set != caption_set:
         missing = sorted(image_set - caption_set)
         extra = sorted(caption_set - image_set)
         raise ValueError(f"Caption/image mismatch. Missing={len(missing)} Extra={len(extra)}")
-
-    missing_files = [path for path in caption_paths if not path.exists()]
-    if missing_files:
-        raise ValueError(f"{len(missing_files)} caption image paths do not exist")
 
     if token_counts != Counter({1: len(rows)}):
         raise ValueError(f"Each prompt must contain exactly one {args.instance_token}; observed {dict(token_counts)}")
