@@ -26,6 +26,10 @@ from transformers import AutoTokenizer, CLIPTextModel
 
 WEIGHTS_NAME = "pytorch_lora_weights.safetensors"
 TOKEN_KEY = "__custom_token_embedding__"
+MODEL_NAME = "runwayml/stable-diffusion-v1-5"
+RESOLUTION = 512
+TRAIN_BATCH_SIZE = 1
+MAX_GRAD_NORM = 1.0
 
 
 def parse_args():
@@ -35,7 +39,6 @@ def parse_args():
     parser.add_argument("--output_dir", type=Path, default=Path("lora_out"))
     parser.add_argument("--captions_jsonl", type=Path)
     parser.add_argument("--auxiliary_jsonl", type=Path)
-    parser.add_argument("--model_name", default="runwayml/stable-diffusion-v1-5")
     parser.add_argument("--token_initializer", default="ghibli style")
     parser.add_argument("--rank", type=int, default=16)
     parser.add_argument("--text_encoder_rank", type=int, default=4)
@@ -44,18 +47,14 @@ def parse_args():
     parser.add_argument("--token_learning_rate", type=float, default=1e-5)
     parser.add_argument("--lora_dropout", type=float, default=0.05)
     parser.add_argument("--caption_dropout_prob", type=float, default=0.08)
-    parser.add_argument("--resolution", type=int, default=512)
     parser.add_argument("--max_steps", type=int, default=250)
     parser.add_argument("--scheduler_steps", type=int, default=500)
-    parser.add_argument("--train_batch_size", type=int, default=1)
     parser.add_argument("--gradient_accumulation_steps", type=int, default=4)
     parser.add_argument("--lr_warmup_steps", type=int, default=50)
     parser.add_argument("--snr_gamma", type=float, default=5.0)
     parser.add_argument("--preservation_loss_weight", type=float, default=0.65)
     parser.add_argument("--token_anchor_loss_weight", type=float, default=0.05)
-    parser.add_argument("--max_grad_norm", type=float, default=1.0)
     parser.add_argument("--seed", type=int, default=2202)
-    parser.add_argument("--mixed_precision", choices=["fp16", "bf16", "no"], default="fp16")
     parser.add_argument("--gradient_checkpointing", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--random_flip", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--allow_tf32", action=argparse.BooleanOptionalAction, default=True)
@@ -292,7 +291,7 @@ def save_weights(output_dir, unet, text_encoder, token, args):
     tensors = load_file(str(path), device="cpu")
     tensors[TOKEN_KEY] = token.detach().float().cpu().contiguous()
     metadata = {
-        "base_model": args.model_name,
+        "base_model": MODEL_NAME,
         "instance_token": args.instance_token,
         "contains_custom_token_embedding": "true",
         "custom_token_embedding_key": TOKEN_KEY,
@@ -337,22 +336,18 @@ def main():
     torch.backends.cuda.enable_math_sdp(True)
 
     device = torch.device("cuda")
-    dtype = {
-        "fp16": torch.float16,
-        "bf16": torch.bfloat16,
-        "no": torch.float32,
-    }[args.mixed_precision]
+    dtype = torch.float16
     examples = load_examples(args)
-    total_draws = args.scheduler_steps * args.gradient_accumulation_steps * args.train_batch_size
+    total_draws = args.scheduler_steps * args.gradient_accumulation_steps * TRAIN_BATCH_SIZE
     schedule = build_schedule(examples, total_draws, args.seed)
 
-    tokenizer = AutoTokenizer.from_pretrained(args.model_name, subfolder="tokenizer", use_fast=False)
+    tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME, subfolder="tokenizer", use_fast=False)
     text_encoder = CLIPTextModel.from_pretrained(
-        args.model_name, subfolder="text_encoder", torch_dtype=dtype
+        MODEL_NAME, subfolder="text_encoder", torch_dtype=dtype
     )
-    vae = AutoencoderKL.from_pretrained(args.model_name, subfolder="vae", torch_dtype=dtype)
-    unet = UNet2DConditionModel.from_pretrained(args.model_name, subfolder="unet", torch_dtype=dtype)
-    noise_scheduler = DDPMScheduler.from_pretrained(args.model_name, subfolder="scheduler")
+    vae = AutoencoderKL.from_pretrained(MODEL_NAME, subfolder="vae", torch_dtype=dtype)
+    unet = UNet2DConditionModel.from_pretrained(MODEL_NAME, subfolder="unet", torch_dtype=dtype)
+    noise_scheduler = DDPMScheduler.from_pretrained(MODEL_NAME, subfolder="scheduler")
 
     token_id = add_token(tokenizer, text_encoder, args.instance_token, args.token_initializer)
     for model in (vae, unet, text_encoder):
@@ -390,19 +385,19 @@ def main():
         num_warmup_steps=args.lr_warmup_steps,
         num_training_steps=args.scheduler_steps,
     )
-    scaler = torch.amp.GradScaler("cuda", enabled=args.mixed_precision == "fp16")
+    scaler = torch.amp.GradScaler("cuda", enabled=True)
 
     dataset = ImageDataset(
         examples,
         tokenizer,
         args.instance_token,
-        args.resolution,
+        RESOLUTION,
         args.caption_dropout_prob,
         args.random_flip,
     )
     loader = DataLoader(
         dataset,
-        batch_size=args.train_batch_size,
+        batch_size=TRAIN_BATCH_SIZE,
         sampler=schedule,
         num_workers=0,
         pin_memory=True,
@@ -412,8 +407,6 @@ def main():
     text_encoder.train()
     optimizer.zero_grad(set_to_none=True)
     progress = tqdm(total=args.max_steps, desc="Training LoRA")
-    autocast_enabled = args.mixed_precision != "no"
-    autocast_dtype = torch.float16 if args.mixed_precision == "fp16" else torch.bfloat16
     step = 0
     accumulation = 0
 
@@ -438,16 +431,14 @@ def main():
         noisy_latents = noise_scheduler.add_noise(latents, noise, timesteps)
 
         set_lora(unet, text_encoder, False)
-        with torch.no_grad(), torch.amp.autocast(
-            "cuda", dtype=autocast_dtype, enabled=autocast_enabled
-        ):
+        with torch.no_grad(), torch.amp.autocast("cuda", dtype=dtype, enabled=True):
             teacher_hidden = text_encoder(plain_ids, return_dict=False)[0]
             teacher_prediction = unet(
                 noisy_latents, timesteps, teacher_hidden, return_dict=False
             )[0]
         set_lora(unet, text_encoder, True)
 
-        with torch.amp.autocast("cuda", dtype=autocast_dtype, enabled=autocast_enabled):
+        with torch.amp.autocast("cuda", dtype=dtype, enabled=True):
             student_hidden = text_encoder(plain_ids, return_dict=False)[0]
             student_prediction = unet(
                 noisy_latents, timesteps, student_hidden, return_dict=False
@@ -461,7 +452,7 @@ def main():
             / args.gradient_accumulation_steps
         ).backward()
 
-        with torch.amp.autocast("cuda", dtype=autocast_dtype, enabled=autocast_enabled):
+        with torch.amp.autocast("cuda", dtype=dtype, enabled=True):
             hidden = text_encoder(input_ids, return_dict=False)[0]
             prediction = unet(noisy_latents, timesteps, hidden, return_dict=False)[0]
             style_loss = diffusion_loss(
@@ -476,7 +467,7 @@ def main():
             continue
         scaler.unscale_(optimizer)
         torch.nn.utils.clip_grad_norm_(
-            unet_parameters + text_parameters + [token], args.max_grad_norm
+            unet_parameters + text_parameters + [token], MAX_GRAD_NORM
         )
         scaler.step(optimizer)
         scaler.update()
