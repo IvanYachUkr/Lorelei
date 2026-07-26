@@ -20,7 +20,7 @@ python3 -m pip install -r requirements.txt
 The measured training environment used Python 3.12, PyTorch 2.11, CUDA 12.8,
 and an RTX 4070 Laptop GPU with approximately 8 GB of VRAM. The selected
 250-step run took about 55 minutes. Stable Diffusion 1.5 is downloaded on first
-use.
+use. On the Cip pool with RTX4000 Ada, it takes >15 minutes.
 
 ## Training
 
