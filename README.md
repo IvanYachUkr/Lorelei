@@ -20,7 +20,7 @@ python3 -m pip install -r requirements.txt
 The measured training environment used Python 3.12, PyTorch 2.11, CUDA 12.8,
 and an RTX 4070 Laptop GPU with approximately 8 GB of VRAM. The selected
 250-step run took about 55 minutes. Stable Diffusion 1.5 is downloaded on first
-use. On the Cip pool with RTX4000 Ada, it takes >15 minutes.
+use. On the Cip pool with RTX4000 Ada, it takes less than 20 minutes.
 
 ## Training
 
@@ -85,6 +85,7 @@ Generates the captions for the ghibli-style images with Florence-2.
 ```bash
 python3 code/auto_captions/generate_captions_florence.py
 ```
+output is code/auto_captions/florence_captions.jsonl
 
 ## Image Generation with untuned SD1.5
 
@@ -94,3 +95,5 @@ We looked at different seeds and only kept good ones for this task. This script 
 ```bash
 python3 code/generate_guidance_images/generate_guidance_images.py
 ```
+
+output images are in training_data/images
