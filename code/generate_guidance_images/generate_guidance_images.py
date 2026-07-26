@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import torch
@@ -20,10 +21,19 @@ SIZE = 512
 
 
 def main():
+    os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")
     recipes = [json.loads(line) for line in RECIPE_PATH.open(encoding="utf-8") if line.strip()]
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
     dtype = torch.float16 if device == "cuda" else torch.float32
+
+    torch.use_deterministic_algorithms(True)
+    if device == "cuda":
+        torch.backends.cudnn.benchmark = False
+        torch.backends.cudnn.deterministic = True
+        torch.backends.cuda.enable_flash_sdp(False)
+        torch.backends.cuda.enable_mem_efficient_sdp(False)
+        torch.backends.cuda.enable_math_sdp(True)
 
     pipe = StableDiffusionPipeline.from_pretrained(
         MODEL_NAME,
