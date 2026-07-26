@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import argparse
 import json
 from pathlib import Path
 
@@ -12,8 +11,7 @@ from diffusers import StableDiffusionPipeline, DPMSolverMultistepScheduler
 SCRIPT_DIR = Path(__file__).resolve().parent
 ASSIGNMENT_DIR = SCRIPT_DIR.parents[1]
 RECIPE_PATH = ASSIGNMENT_DIR / "training_data" / "auxiliary.jsonl"
-IMAGES_DIR = SCRIPT_DIR / "images"
-OUT_PATH = SCRIPT_DIR / "auxiliary.jsonl"
+IMAGES_DIR = ASSIGNMENT_DIR / "training_data" / "images"
 
 MODEL_NAME = "runwayml/stable-diffusion-v1-5"
 NUM_INFERENCE_STEPS = 30
@@ -22,13 +20,7 @@ SIZE = 512
 
 
 def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--limit", type=int, default=None)
-    args = parser.parse_args()
-
     recipes = [json.loads(line) for line in RECIPE_PATH.open(encoding="utf-8") if line.strip()]
-    if args.limit:
-        recipes = recipes[: args.limit]
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
     dtype = torch.float16 if device == "cuda" else torch.float32
@@ -43,22 +35,19 @@ def main():
     pipe.to(device)
 
     IMAGES_DIR.mkdir(parents=True, exist_ok=True)
-    with OUT_PATH.open("w", encoding="utf-8") as handle:
-        for recipe in tqdm(recipes):
-            generator = torch.Generator(device=device).manual_seed(recipe["seed"])
-            image = pipe(
-                prompt=recipe["generation_prompt"],
-                negative_prompt=recipe["negative_prompt"],
-                num_inference_steps=NUM_INFERENCE_STEPS,
-                guidance_scale=GUIDANCE_SCALE,
-                height=SIZE,
-                width=SIZE,
-                generator=generator,
-            ).images[0]
+    for recipe in tqdm(recipes):
+        generator = torch.Generator(device=device).manual_seed(recipe["seed"])
+        image = pipe(
+            prompt=recipe["generation_prompt"],
+            negative_prompt=recipe["negative_prompt"],
+            num_inference_steps=NUM_INFERENCE_STEPS,
+            guidance_scale=GUIDANCE_SCALE,
+            height=SIZE,
+            width=SIZE,
+            generator=generator,
+        ).images[0]
 
-
-            image.save(IMAGES_DIR / Path(recipe["image"]).name)
-            handle.write(json.dumps(recipe) + "\n")
+        image.save(IMAGES_DIR / Path(recipe["image"]).name)
 
 
 if __name__ == "__main__":
