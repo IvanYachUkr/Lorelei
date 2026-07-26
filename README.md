@@ -85,7 +85,7 @@ Generates the captions for the ghibli-style images with Florence-2.
 ```bash
 python3 code/auto_captions/generate_captions_florence.py
 ```
-output is code/auto_captions/florence_captions.jsonl
+output is `code/auto_captions/florence_captions.jsonl`
 
 ## Image Generation with untuned SD1.5
 
@@ -96,4 +96,4 @@ We looked at different seeds and only kept good ones for this task. This script 
 python3 code/generate_guidance_images/generate_guidance_images.py
 ```
 
-output images are in training_data/images
+output images are in `training_data/images`
