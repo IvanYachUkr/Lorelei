@@ -9,7 +9,7 @@ Stable Diffusion 1.5 UNet and text encoder. The final checkpoint is
 
 ## Installation
 
-Python 3.10 or newer and a CUDA GPU are recommended.
+Python 3.10 or newer.
 
 ```bash
 python3 -m venv .venv
