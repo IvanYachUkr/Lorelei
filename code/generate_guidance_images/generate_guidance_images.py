@@ -56,12 +56,9 @@ def main():
                 generator=generator,
             ).images[0]
 
-            name = f"{recipe['id']}.png"
-            image.save(IMAGES_DIR / name)
 
-            row = dict(recipe)
-            row["image"] = f"images/{name}"
-            handle.write(json.dumps(row) + "\n")
+            image.save(IMAGES_DIR / Path(recipe["image"]).name)
+            handle.write(json.dumps(recipe) + "\n")
 
 
 if __name__ == "__main__":
