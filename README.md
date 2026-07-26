@@ -73,7 +73,7 @@ python3 code/eval_lora.py \
 ```
 
 The evaluation script restores `<sks>`, loads both LoRA branches, and renders
-three 512x512 images.
+5 512x512 images.
 
 # Supplemental
 The output of these scripts are already included in the zip but you can run them as follows:
