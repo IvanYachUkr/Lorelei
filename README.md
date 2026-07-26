@@ -74,3 +74,23 @@ python3 code/eval_lora.py \
 
 The evaluation script restores `<sks>`, loads both LoRA branches, and renders
 three 512x512 images.
+
+# Supplemental
+The output of these scripts are already included in the zip but you can run them as follows:
+
+## Caption Generation
+
+Generates the captions for the ghibli-style images with Florence-2.
+
+```bash
+python3 code/auto_captions/generate_captions_florence.py
+```
+
+## Image Generation with untuned SD1.5
+
+Generates the images we used for keeping the memory of what a market and face looks like across longer training runs.
+We looked at different seeds and only kept good ones for this task. This script only regenerates the images we kept in the end.
+
+```bash
+python3 code/generate_guidance_images/generate_guidance_images.py
+```
